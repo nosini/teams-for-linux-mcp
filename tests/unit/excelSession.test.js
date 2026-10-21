@@ -53,8 +53,10 @@ describe("Excel live session", () => {
       if (change === "url") state.url = "https://tenant.sharepoint.com/other.xlsx";
       if (change === "sheet") args.worksheetId = "other-id";
       if (change === "range") args.address = "B1";
-      if (change === "expiry") state.now += 120001;
-      assert.equal((await call("write_range", args, overrides)).ok, false, change);
+      if (change === "expiry") state.now += 120000; // Exactly at expiry, as for structure tokens.
+      const result = await call("write_range", args, overrides);
+      assert.equal(result.ok, false, change);
+      if (change !== "document" && change !== "url") assert.equal(result.code, "STALE_READ", change);
       assert.equal(model.writes, 0, change);
     }
   });

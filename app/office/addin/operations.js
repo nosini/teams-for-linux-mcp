@@ -79,10 +79,11 @@
 
     requireApi(name, version) { if (!this.isSetSupported(name, version)) fail("UNSUPPORTED_API"); }
 
-    consume(readToken) {
+    // A write attempt consumes the token even if its outcome is uncertain.
+    consume(readToken, code = "STALE_STRUCTURE") {
       const expected = this.snapshots.get(readToken);
       this.snapshots.delete(readToken);
-      if (!expected || expected.expires <= this.now()) fail("STALE_STRUCTURE");
+      if (!expected || expected.expires <= this.now()) fail(code);
       return expected;
     }
 
@@ -142,10 +143,8 @@
         let expected;
         if (writing) {
           validateData(args.address, args.data, operation === "set_formulas");
-          expected = this.snapshots.get(args.readToken);
-          // A write attempt consumes the token even if its outcome is uncertain.
-          this.snapshots.delete(args.readToken);
-          if (!expected || expected.expires < this.now() || expected.worksheetId !== args.worksheetId || expected.address !== shape.address) fail("STALE_READ");
+          expected = this.consume(args.readToken, "STALE_READ");
+          if (expected.worksheetId !== args.worksheetId || expected.address !== shape.address) fail("STALE_READ");
         }
         const data = await this.excel.run(async (context) => {
           const sheet = context.workbook.worksheets.getItem(args.worksheetId);

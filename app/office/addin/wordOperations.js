@@ -57,9 +57,8 @@
         let expected;
         if (writing) {
           validateText(args.findText, args.replacementText);
-          expected = this.snapshots.get(args.readToken);
-          this.snapshots.delete(args.readToken);
-          if (!expected || expected.expires <= this.now() || expected.paragraphId !== args.paragraphId) fail("STALE_PARAGRAPH");
+          expected = this.consume(args.readToken, "STALE_PARAGRAPH");
+          if (expected.paragraphId !== args.paragraphId) fail("STALE_PARAGRAPH");
         }
         const data = await this.word.run(async (context) => {
           const paragraph = context.document.getParagraphByUniqueLocalId(args.paragraphId);
