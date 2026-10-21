@@ -20,7 +20,7 @@
   async function initialize() {
     if (!globalThis.Office) throw new Error("Office.js did not load");
     const info = await globalThis.Office.onReady();
-    const options = { documentId, getDocumentUrl: () => globalThis.Office.context.document.url };
+    const options = { isSetSupported: (name, version) => globalThis.Office.context.requirements.isSetSupported(name, version), documentId, getDocumentUrl: () => globalThis.Office.context.document.url };
     if (info.host === globalThis.Office.HostType.Excel && globalThis.Office.context.requirements.isSetSupported("ExcelApi", "1.1")) {
       application = "excel";
       name = "Excel workbook";

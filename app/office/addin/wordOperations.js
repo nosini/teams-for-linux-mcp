@@ -2,7 +2,7 @@
 ((root, factory) => {
   if (typeof module === "object" && module.exports) module.exports = factory(require("./operations"));
   else root.TeamsWordOperations = factory(root.TeamsExcelOperations);
-})(globalThis, ({ OfficeSession, bounded, fail, messages }) => {
+})(globalThis, ({ OfficeSession, bounded, fail, messages, editing }) => {
   const paragraphIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
   const hasBreaks = (text) => [...text].some((char) => char.charCodeAt(0) < 32 || ["\u007f", "\u2028", "\u2029"].includes(char));
 
@@ -31,6 +31,9 @@
       try {
         this.check(request);
         const { operation, args = {} } = request;
+        if (editing.wordOperations.includes(operation)) {
+          return { ok: true, data: await editing.executeWord(this, request, { fail, bounded }) };
+        }
         if (operation === "read_paragraphs") {
           const { start = 0, count = 20 } = args;
           if (!Number.isInteger(start) || start < 0 || start > 100000 ||

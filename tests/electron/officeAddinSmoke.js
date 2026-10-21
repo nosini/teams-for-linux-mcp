@@ -91,6 +91,18 @@ app.whenReady().then(async () => {
         await assert.rejects(bridge.execute(id, "write_range", { ...target, readToken: read.readToken, data: [[8]] }), /token expired/);
         const formula = await bridge.execute(id, "set_formulas", { ...target, readToken: written.readToken, data: [["=1+2"]] });
         assert.deepEqual(formula.values, [[3]]);
+        const inspected = await bridge.execute(id, "inspect_worksheet", { worksheetId: target.worksheetId });
+        assert.equal(inspected.usedRange.rowCount, 1);
+        const found = await bridge.execute(id, "search_range", { ...target, query: "1+2", searchIn: "formulas" });
+        assert.equal(found.matches[0].address, "A1");
+        const format = await bridge.execute(id, "read_range_format", target);
+        const formatted = await bridge.execute(id, "format_range", { ...target, readToken: format.readToken, format: { numberFormat: "0.00", font: { bold: true } } });
+        assert.equal(formatted.format.font.bold, true);
+        assert.deepEqual(formatted.values, [[3]]);
+        const layout = await bridge.execute(id, "inspect_worksheet", { worksheetId: target.worksheetId });
+        assert.equal((await bridge.execute(id, "insert_rows_columns", { worksheetId: target.worksheetId, readToken: layout.readToken, axis: "rows", index: 0, count: 1 })).applied, true);
+        const listing = await bridge.execute(id, "list_worksheets", {});
+        assert.equal((await bridge.execute(id, "create_worksheet", { name: "Review", readToken: listing.readToken })).name, "Review");
       } else {
         const page = await bridge.execute(id, "read_paragraphs", { count: 1 });
         assert.ok(page.nextStart !== null);
@@ -101,6 +113,27 @@ app.whenReady().then(async () => {
         assert.equal(replaced.text, "Updated from Word.");
         await assert.rejects(bridge.execute(id, "replace_text", { ...paragraph, findText: "Updated", replacementText: "Again" }), /token expired/);
         await assert.rejects(bridge.execute(id, "list_worksheets", {}), /does not match/);
+        const structure = await bridge.execute(id, "read_structure", { count: 1 });
+        const target = { paragraphId: structure.paragraphs[0].paragraphId };
+        const details = await bridge.execute(id, "read_paragraph_details", target);
+        assert.equal((await bridge.execute(id, "format_paragraph", { ...target, readToken: details.readToken, format: { styleBuiltIn: "Heading1", font: { bold: true } } })).format.font.bold, true);
+        const fresh = await bridge.execute(id, "read_paragraph", target);
+        assert.equal((await bridge.execute(id, "add_comment", { ...target, readToken: fresh.readToken, text: "Review this" })).applied, true);
+        const comments = await bridge.execute(id, "read_comments", target);
+        assert.equal(comments.comments[0].comment.content, "Review this");
+        const commentTarget = { ...target, commentId: comments.comments[0].comment.id, readToken: comments.comments[0].readToken };
+        assert.equal((await bridge.execute(id, "reply_comment", { ...commentTarget, text: "Checked" })).applied, true);
+        const updatedComments = await bridge.execute(id, "read_comments", target);
+        assert.equal((await bridge.execute(id, "resolve_comment", { ...commentTarget, readToken: updatedComments.comments[0].readToken, resolved: true })).applied, true);
+        const mode = await bridge.execute(id, "get_change_tracking", {});
+        assert.equal((await bridge.execute(id, "set_change_tracking", { mode: "TrackAll", readToken: mode.readToken })).mode, "TrackAll");
+        assert.deepEqual((await bridge.execute(id, "read_tracked_changes", target)).changes, []);
+        const anchor = await bridge.execute(id, "read_paragraph", target);
+        const inserted = await bridge.execute(id, "insert_paragraph", { ...target, readToken: anchor.readToken, text: "New paragraph", position: "After" });
+        const whole = await bridge.execute(id, "replace_paragraph", { paragraphId: inserted.paragraphId, readToken: inserted.readToken, text: "Whole paragraph replaced" });
+        assert.equal(whole.text, "Whole paragraph replaced");
+        assert.equal((await bridge.execute(id, "delete_paragraph", { paragraphId: whole.paragraphId, readToken: whole.readToken })).applied, true);
+        assert.deepEqual((await bridge.execute(id, "list_tables", {})).tables, []);
       }
       const frame = window.webContents.mainFrame.framesInSubtree.find((candidate) => candidate.url.startsWith(host.origin));
       assert.ok(frame);
@@ -119,7 +152,7 @@ app.whenReady().then(async () => {
     assert.ok(pane);
     assert.match(await pane.executeJavaScript("document.getElementById('status').textContent"), /needs WordApi 1.6/);
     assert.equal((await bridge.listDocuments()).documents.length, 0);
-    console.log("Office add-in Electron smoke passed: certificate pin, Excel reads/writes/formulas, Word paragraph reads/replacements, stale tokens, application binding, disconnect and unsupported Word hosts. Office.js was simulated.");
+    console.log("Office add-in Electron smoke passed: certificate pin, Excel reads/writes/formulas, Word paragraph reads/replacements, extended discovery, formatting, structural edits, comments, tracking mode, stale tokens, application binding, disconnect and unsupported Word hosts. Office.js was simulated.");
   } finally {
     for (const window of windows) window.destroy();
     await host.close();

@@ -44,6 +44,8 @@ describe("Office add-in HTTPS host", () => {
     assert.equal(manifest.DefaultSettings[0].SourceLocation[0].$.DefaultValue, `${host.origin}/taskpane.html`);
     assert.equal(manifest.Permissions[0], "ReadWriteDocument");
     assert.equal((await request("/wordOperations.js")).status, 200);
+    assert.equal((await request("/editingOperations.js")).status, 200);
+    assert.ok(page.data.indexOf("editingOperations.js") < page.data.indexOf("operations.js"));
     const wordManifest = (await parseStringPromise(await fs.readFile(host.wordManifestPath, "utf8"))).OfficeApp;
     assert.equal(wordManifest.Hosts[0].Host[0].$.Name, "Document");
     assert.equal(wordManifest.Requirements[0].Sets[0].$.DefaultMinVersion, "1.6");

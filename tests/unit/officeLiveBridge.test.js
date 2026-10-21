@@ -135,6 +135,51 @@ describe("Live Office bridge", () => {
     assert.equal(model.writes, 2);
   });
 
+  it("serves extended inspection and editing through MCP with strict schemas and host binding", async (t) => {
+    for (const application of ["excel", "word"]) await t.test(application, async (t) => {
+      const root = path.resolve(__dirname, "../../test-results/mcp");
+      await fs.mkdir(root, { recursive: true });
+      const directory = await fs.mkdtemp(path.join(root, "editing-"));
+      const { bridge, id } = fixture(application);
+      const endpoint = await startLocalEndpoint({ directory, createServer: () => createOfficeMcpServer({ listEditors: () => ({ editors: [] }) }, bridge) });
+      const client = new Client({ name: "editing-test", version: "1" });
+      t.after(async () => { await client.close(); await endpoint.close(); await fs.rm(directory, { recursive: true, force: true }); });
+      await client.connect(new StdioClientTransport({ command: process.execPath, args: [path.resolve(__dirname, "../../app/mcp/stdio.js"), endpoint.socketPath] }));
+      const call = (name, args = {}) => client.callTool({ name, arguments: { documentId: id, ...args } });
+      await client.callTool({ name: "office_list_documents", arguments: {} });
+      const tools = (await client.listTools()).tools;
+      assert.equal(tools.length, 32);
+      assert.equal(tools.find((tool) => tool.name === "word_read_structure").annotations.readOnlyHint, true);
+      assert.equal(tools.find((tool) => tool.name === "word_resolve_tracked_change").annotations.destructiveHint, true);
+      if (application === "excel") {
+        const target = { worksheetId: "sheet-id", address: "A1" };
+        assert.equal((await call("excel_inspect_worksheet", { worksheetId: "sheet-id" })).structuredContent.usedRange.rowCount, 1);
+        assert.equal((await call("excel_search_range", { ...target, query: "1" })).structuredContent.matches[0].address, "A1");
+        const read = (await call("excel_read_range_format", target)).structuredContent;
+        const result = await call("excel_format_range", { ...target, readToken: read.readToken, format: { numberFormat: "0.00", font: { bold: true } } });
+        assert.equal(result.structuredContent.format.font.bold, true);
+        assert.equal((await call("excel_format_range", { ...target, readToken: result.structuredContent.readToken, format: { arbitrary: true } })).isError, true);
+        const sheets = (await call("excel_list_worksheets")).structuredContent;
+        assert.equal((await call("excel_create_worksheet", { readToken: sheets.readToken, name: "Review" })).structuredContent.name, "Review");
+        assert.equal((await call("word_read_structure")).isError, true);
+      } else {
+        const structure = (await call("word_read_structure", { count: 1 })).structuredContent;
+        assert.equal(structure.paragraphs[0].styleBuiltIn, "Normal");
+        const target = { paragraphId: structure.paragraphs[0].paragraphId };
+        const details = (await call("word_read_paragraph_details", target)).structuredContent;
+        const result = await call("word_format_paragraph", { ...target, readToken: details.readToken, format: { styleBuiltIn: "Heading1" } });
+        assert.equal(result.structuredContent.format.styleBuiltIn, "Heading1");
+        const added = await call("word_add_comment", { ...target, readToken: result.structuredContent.readToken, text: "Please review" });
+        assert.equal(added.structuredContent.applied, true);
+        assert.equal((await call("word_read_comments", target)).structuredContent.comments[0].comment.content, "Please review");
+        const mode = (await call("word_get_change_tracking")).structuredContent;
+        assert.equal((await call("word_set_change_tracking", { readToken: mode.readToken, mode: "TrackAll" })).structuredContent.mode, "TrackAll");
+        assert.equal((await call("word_replace_paragraph", { ...target, readToken: details.readToken, text: "bad\nparagraph" })).isError, true);
+        assert.equal((await call("excel_inspect_worksheet", { worksheetId: "sheet-id" })).isError, true);
+      }
+    });
+  });
+
   it("serves Word reads and replacements through the official MCP client and validates inputs", async (t) => {
     const root = path.resolve(__dirname, "../../test-results/mcp");
     await fs.mkdir(root, { recursive: true });

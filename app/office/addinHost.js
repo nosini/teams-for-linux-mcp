@@ -61,7 +61,7 @@ async function startAddinHost({ directory, port = 39847 }) {
   if (!Number.isInteger(port) || (port !== 0 && (port < 1024 || port > 65535))) throw new Error("Invalid add-in port");
   const { cert, key, certificate } = await credentials(path.join(directory, "addin"));
   const assets = new Map();
-  for (const [name, type] of [["taskpane.html", "text/html"], ["taskpane.js", "text/javascript"], ["operations.js", "text/javascript"], ["wordOperations.js", "text/javascript"], ["taskpane.css", "text/css"]]) {
+  for (const [name, type] of [["taskpane.html", "text/html"], ["taskpane.js", "text/javascript"], ["editingOperations.js", "text/javascript"], ["operations.js", "text/javascript"], ["wordOperations.js", "text/javascript"], ["taskpane.css", "text/css"]]) {
     assets.set(`/${name}`, { content: await fs.readFile(path.join(__dirname, "addin", name)), type });
   }
   let origin;

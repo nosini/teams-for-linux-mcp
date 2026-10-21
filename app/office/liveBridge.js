@@ -1,4 +1,5 @@
 const { classifyOfficeUrl } = require("./inspector");
+const { editing } = require("./addin/operations");
 const { messages } = require("./addin/operations");
 
 class LiveOfficeBridge {
@@ -57,8 +58,8 @@ class LiveOfficeBridge {
   async execute(documentId, operation, args) {
     const entry = this.documents.get(documentId);
     if (!entry || this.applicationOf(entry.frame) !== entry.application) throw new Error(messages.WRONG_DOCUMENT);
-    const operations = entry.application === "word" ? ["read_paragraphs", "read_paragraph", "replace_text"] :
-      ["list_worksheets", "read_range", "write_range", "set_formulas"];
+    const operations = entry.application === "word" ? ["read_paragraphs", "read_paragraph", "replace_text", ...editing.wordOperations] :
+      ["list_worksheets", "read_range", "write_range", "set_formulas", ...editing.excelOperations];
     if (!operations.includes(operation)) throw new Error(messages.WRONG_APPLICATION);
     if (this.busy.has(documentId)) throw new Error(messages.BUSY);
     this.busy.add(documentId);

@@ -809,9 +809,11 @@ async function handleAppReady() {
     if (config.mcp?.enabled === true && process.platform === "linux") {
       try {
         const { OfficeInspector } = require("./office/inspector");
+        const { SurfaceInspector } = require("./editor/inspector");
         const { createOfficeMcpServer } = require("./mcp/server");
         const { startLocalEndpoint } = require("./mcp/localEndpoint");
         const inspector = new OfficeInspector(() => webContents.getAllWebContents());
+        const surfaceInspector = new SurfaceInspector(() => webContents.getAllWebContents());
         let liveBridge = null;
         if (config.mcp.addin?.enabled === true) {
           const { startAddinHost } = require("./office/addinHost");
@@ -833,7 +835,7 @@ async function handleAppReady() {
         }
         officeMcpEndpoint = await startLocalEndpoint({
           directory: path.join(app.getPath("userData"), "mcp"),
-          createServer: () => createOfficeMcpServer(inspector, liveBridge, channelFiles),
+          createServer: () => createOfficeMcpServer(inspector, liveBridge, channelFiles, surfaceInspector),
         });
         console.info(`[MCP] Office diagnostics available at ${officeMcpEndpoint.socketPath}`);
       } catch (error) {

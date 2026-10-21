@@ -3,9 +3,9 @@ const { z } = require("zod");
 const { rangeShape, validateData } = require("../office/addin/operations");
 const { validateText, paragraphIdPattern } = require("../office/addin/wordOperations");
 
-function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null) {
+function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null, surfaceInspector = null) {
   const server = new McpServer({ name: "teams-for-linux-office", version: "0.1.0" }, {
-    instructions: liveBridge ? "List connected documents first and choose tools matching the application. Excel writes require a read token from the same worksheet and range. Word replacements require a read token from the same paragraph and exactly one matching text occurrence. Do not automatically retry a timed-out write. API presence diagnostics alone do not indicate a live bridge." : "This server discovers Office frames in Teams. API presence is diagnostic only. Channel file tools, when enabled, use the signed-in Teams session. List teams, channels and files before choosing a file. Do not automatically retry timed-out writes.",
+    instructions: liveBridge ? "List connected documents first and choose tools matching the application. Excel writes require a read token from the same worksheet and range. Word text edits require a read token from the same paragraph; literal replacements require exactly one matching occurrence. Formatting and structure tools specify their own inspection tokens. Inspect comments/revisions before explicitly editing them; do not automatically change tracking mode or accept/reject changes. Do not automatically retry a timed-out write. API presence diagnostics alone do not indicate a live bridge." : "This server discovers Office frames in Teams. API presence is diagnostic only. Channel file tools, when enabled, use the signed-in Teams session. List teams, channels and files before choosing a file. Do not automatically retry timed-out writes.",
   });
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
   const result = (value) => ({ content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value });
@@ -81,6 +81,20 @@ function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null
       }, ({ documentId: id, ...args }) => respond(() => liveBridge.execute(id, operation, args)));
     }
   }
+  if (surfaceInspector) {
+    server.registerTool("editor_list_frames", {
+      description: "List HTTPS frame IDs and origins in the running Teams client, including non-Office file editors. Returns no document URLs, names or content. inspectable identifies Microsoft-hosted frames eligible for the fixed read-only editor probe.",
+      inputSchema: z.object({}).strict(), annotations,
+    }, () => result(surfaceInspector.listFrames()));
+    server.registerTool("editor_inspect_frame", {
+      description: "Run a fixed read-only probe on a listed inspectable frame to identify editor types (Monaco, CodeMirror, ProseMirror, Lexical, Slate, Quill), editable-element counts and adapter-handle presence. Does not read text or invoke editor/save/collaboration methods. Presence does not prove model or coauthor access. No caller JavaScript is accepted.",
+      inputSchema: z.object({ frameId: z.string().regex(/^\d+:\d+:\d+$/).max(80) }).strict(), annotations,
+    }, async ({ frameId }) => {
+      try { return result(await surfaceInspector.inspectFrame(frameId)); }
+      catch { return { isError: true, content: [{ type: "text", text: "Select an inspectable frame from editor_list_frames again." }] }; }
+    });
+  }
+  if (liveBridge) require("./editingTools").registerEditingTools(server, liveBridge);
   if (channelFiles) require("./channelFiles").registerChannelFileTools(server, channelFiles);
   return server;
 }

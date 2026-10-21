@@ -1,8 +1,9 @@
 # Connect an agent to Word and Excel
 
 The Office bridge lets an MCP agent read and edit Word and Excel documents open
-inside Teams for Linux. Excel supports cell reads, value writes and formulas;
-Word supports paragraph reads and exact text replacements. Documents stay in
+inside Teams for Linux. Excel supports discovery, cell reads, values, formulas,
+formatting and worksheet structure edits. Word supports paragraph and table
+inspection, text and style edits, comments and tracked-change review. Documents stay in
 Office's normal saving and coauthoring workflow.
 
 ## Enable the bridge
@@ -117,6 +118,51 @@ out write, read back before attempting another write.
 
 See the [development guide](development/office-mcp.md) for tool arguments, limits,
 and implementation details.
+
+## Inspect and edit live documents
+
+Ask the agent to list connected documents first. The new tools use the same
+add-ins and configuration. After updating Teams, reopen the add-in panes and
+reconnect the agent to refresh its catalog. Container users should recreate
+their container after the Teams restart.
+
+For Excel, the agent can discover used-range bounds and structured tables,
+search text or formulas in windows of up to 1,000 cells, inspect number formats
+and basic formatting, and apply a uniform format to a selected range. It can
+also create worksheets and insert whole rows or columns. Insertion checks the
+sheet ID and used-range bounds, not every cell's content or every table;
+coordinate structural edits with other editors.
+
+For Word, the agent can inspect paragraph styles and headings, read table rows,
+inspect fonts and alignment, replace whole paragraphs, insert or delete a
+paragraph, and apply basic styles and formatting. Full paragraph replacement
+can remove inline formatting, fields and links. Prefer exact text replacement
+for small corrections where surrounding rich content should remain intact.
+
+Word review tools read comments and replies, add comments, reply to threads,
+and resolve or reopen them. Separate tools inspect and explicitly set the
+shared document's tracking mode and inspect, accept or reject individual
+revisions within a selected paragraph. The bridge never changes tracking mode
+or accepts/rejects revisions implicitly.
+
+Font options are bold, italic, font name, size and RGB color. Word additionally
+supports paragraph styles and alignment; Excel supports number formats, fill
+color, alignment and wrapping. Mixed formatting may return null or empty
+properties. Only explicitly supplied formatting properties change.
+
+Write tokens expire after two minutes and are consumed on attempted writes.
+Formatting edits require a formatting-inspection token; comment and revision
+edits require their own review tokens. Structural operations and revision
+resolution invalidate earlier document tokens. Coauthor edits can still occur
+between comparison and writing. Inspect results after an uncertain write
+before trying again.
+
+New Word tools use WordApi 1.6, matching the existing Word requirement. Excel
+used-range inspection and row/column insertion require ExcelApi 1.4; other new
+Excel tools use ExcelApi 1.1. Unsupported hosts return a clear error. See the
+[tool reference](development/office-mcp.md#extended-live-document-tools) for
+names, arguments and limits. The new tools have automated and simulated
+Electron coverage; real Office compatibility still needs live testing.
 
 ## Read and write channel files
 

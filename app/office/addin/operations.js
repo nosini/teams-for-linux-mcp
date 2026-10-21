@@ -1,10 +1,13 @@
 // Shared validation and Office.js operations. This module runs in the task pane
 // and in Node tests; it never reads local files or accepts executable code.
 ((root, factory) => {
-  if (typeof module === "object" && module.exports) module.exports = factory();
-  else root.TeamsExcelOperations = factory();
-})(globalThis, () => {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./editingOperations"));
+  else root.TeamsExcelOperations = factory(root.TeamsOfficeEditing);
+})(globalThis, (editing) => {
   const messages = {
+    INVALID_EDIT: "Use bounded text, valid formatting and valid structural edit arguments.",
+    UNSUPPORTED_API: "This Office host does not support the API required by this tool.",
+    STALE_STRUCTURE: "The read token expired, was used, or the structure/review state changed. Inspect it again before editing.",
     INVALID_RANGE: "Use a single A1 rectangle of at most 1,000 cells within Excel's worksheet bounds.",
     INVALID_DATA: "Data must match the range dimensions and fit within 32 KB. Literal text cannot begin with =, + or -; use the formula tool for formulas.",
     WRONG_DOCUMENT: "The document changed or disconnected. List documents again.",
@@ -55,7 +58,8 @@
   }
 
   class OfficeSession {
-    constructor({ documentId, getDocumentUrl, randomUUID = () => crypto.randomUUID(), now = Date.now }) {
+    constructor({ documentId, getDocumentUrl, randomUUID = () => crypto.randomUUID(), now = Date.now, isSetSupported = () => true }) {
+      this.isSetSupported = isSetSupported;
       this.documentId = documentId;
       this.getDocumentUrl = getDocumentUrl;
       this.initialUrl = getDocumentUrl();
@@ -71,6 +75,21 @@
     check(request) {
       if (!this.active || request.documentId !== this.documentId || this.getDocumentUrl() !== this.initialUrl) fail("WRONG_DOCUMENT");
       if (!Number.isFinite(request.deadline) || this.now() >= request.deadline) fail("TIMEOUT");
+    }
+
+    requireApi(name, version) { if (!this.isSetSupported(name, version)) fail("UNSUPPORTED_API"); }
+
+    consume(readToken) {
+      const expected = this.snapshots.get(readToken);
+      this.snapshots.delete(readToken);
+      if (!expected || expected.expires <= this.now()) fail("STALE_STRUCTURE");
+      return expected;
+    }
+
+    boundedResult(result) { if (!bounded(result)) fail("TOO_LARGE"); return result; }
+    rememberBounded(result) {
+      this.boundedResult({ ...result, readToken: "0".repeat(36) });
+      return this.remember(result);
     }
 
     remember(result) {
@@ -101,6 +120,9 @@
       try {
         this.check(request);
         const { operation, args = {} } = request;
+        if (editing.excelOperations.includes(operation)) {
+          return { ok: true, data: await editing.executeExcel(this, request, { fail, rangeShape, bounded }) };
+        }
         if (operation === "list_worksheets") {
           const data = await this.excel.run(async (context) => {
             const sheets = context.workbook.worksheets;
@@ -108,7 +130,8 @@
             await context.sync();
             this.check(request);
             const worksheets = sheets.items.slice(0, 200).map(({ id, name, position }) => ({ id, name, position }));
-            return { worksheets, truncated: sheets.items.length > 200 };
+            const result = { worksheets, truncated: sheets.items.length > 200 };
+            return result.truncated ? result : this.rememberBounded({ kind: "worksheets", ...result });
           });
           return { ok: true, data };
         }
@@ -154,5 +177,5 @@
       }
     }
   }
-  return { OfficeSession, ExcelSession, rangeShape, validateData, bounded, fail, messages };
+  return { OfficeSession, ExcelSession, rangeShape, validateData, bounded, fail, messages, editing };
 });

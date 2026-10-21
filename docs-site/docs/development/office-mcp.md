@@ -2,9 +2,10 @@
 
 The Office MCP bridge connects local agents to documents inside the running
 Teams client. Diagnostics discover Word and Excel frames. The optional Excel
-task pane provides live worksheet reads, value writes and formula writes through
-Office.js. The Word task pane reads paragraphs and replaces exact text inside a
-chosen paragraph using the same local bridge.
+task pane provides live worksheet reads, discovery, formatting, value/formula
+writes and structural edits through Office.js. The Word task pane provides
+paragraph and table inspection, text and style edits, comments and tracked-change
+review using the same local bridge.
 
 For installation, agent configuration and container connections, see
 [Connect an agent to Word and Excel](../office-agents.md).
@@ -145,7 +146,8 @@ caret codes and control characters are rejected. Replacement is plain text,
 limited to 8,192 characters with no paragraph breaks; an empty string deletes
 the matched text. Only the matched range is replaced, leaving surrounding
 content intact. Formatting within the replacement follows Word's behavior;
-this tool does not provide rich-text editing or paragraph creation. The token
+this literal replacement tool does not create paragraphs; separate tools below
+provide whole-paragraph edits, formatting and paragraph insertion. The token
 compares text, not formatting. Word's own save and coauthoring workflow remains
 responsible for the document.
 
@@ -156,6 +158,110 @@ against a disposable document before using these tools on real work.
 The API choices follow Microsoft's reference for
 [paragraph IDs and search](https://learn.microsoft.com/en-us/javascript/api/word/word.paragraph?view=word-js-preview)
 and [paged collection loads](https://learn.microsoft.com/en-us/javascript/api/office/officeextension.loadoption?view=word-js-preview).
+
+## Extended live-document tools
+
+Registered with the live add-in bridge alongside the original tools. All take
+`documentId` from `office_list_documents`. Pages use zero-based `start` and
+`count` (default 20, maximum 50), with `nextStart` to continue. Results and
+arguments are capped at 32 KiB. A single unusually large paragraph, cell or
+table row can exceed this limit.
+
+### Excel
+
+| Tool | Additional arguments | Result or effect |
+| --- | --- | --- |
+| `excel_inspect_worksheet` | `worksheetId`, optional page | Used bounds, paged structured tables and layout token |
+| `excel_search_range` | `worksheetId`, `address`, `query`, optional `searchIn` (`text`/`formulas`), `matchCase`, `offset` | Up to 50 literal matches; continue with `nextOffset` in the same window |
+| `excel_read_range_format` | `worksheetId`, `address` | Values, formulas, text, number formats, basic formatting and format token |
+| `excel_format_range` | Same range, `readToken`, `format` | Uniform formatting; checks content and inspected formatting |
+| `excel_create_worksheet` | `name`, `readToken` from `excel_list_worksheets` | New worksheet ID/name/position; checks the sheet list |
+| `excel_insert_rows_columns` | `worksheetId`, `axis` (`rows`/`columns`), `index`, `count`, layout `readToken` | Insert whole rows/columns before a zero-based index |
+
+Search and formatting use A1 rectangles of at most 1,000 cells. Search scans a
+bounded window, treating wildcard characters literally. Use used-range metadata
+to plan windows across large sheets. Search results are not write tokens.
+
+Excel `format` accepts `numberFormat` (one invariant format string applied to all
+cells), `font`, `fillColor`, `horizontalAlignment`, `verticalAlignment` and
+`wrapText`. Font accepts `bold`, `italic`, `name`, `size` (1–200 points) and
+`color`; colors use `#RRGGBB`. Unspecified properties remain unchanged. Mixed
+properties may return null/empty values. Number formats are a per-cell matrix.
+
+Worksheet creation needs a non-truncated worksheet-list token (maximum 200
+sheets) and a unique valid Excel name of at most 31 characters. Insertion allows
+up to 100 rows or 20 columns per call. Layout tokens compare worksheet ID and
+used-range bounds, not all cell content or table structure. Excel shifts data
+and references. Coordinate structural edits with coauthors. These operations
+invalidate all earlier pane tokens. Used-range inspection/insertion require
+ExcelApi 1.4; other new Excel tools require ExcelApi 1.1.
+
+### Word
+
+| Tool | Additional arguments | Result or effect |
+| --- | --- | --- |
+| `word_read_structure` | Optional page | Paragraph IDs/text, styles/alignment and ordinary text tokens |
+| `word_read_paragraph_details` | `paragraphId` | Text, style, alignment, font and format token |
+| `word_list_tables` | Optional page | Main-body table indexes and row counts |
+| `word_read_table` | `tableIndex`, optional `rowStart`, `rowCount` | Paged row/cell text, cell counts and `nextRowStart` |
+| `word_replace_paragraph` | `paragraphId`, ordinary `readToken`, `text` | Replace complete paragraph content, excluding its mark |
+| `word_insert_paragraph` | Anchor `paragraphId`, ordinary `readToken`, `text`, `position` (`Before`/`After`), optional `styleBuiltIn` | New paragraph ID/text/token |
+| `word_delete_paragraph` | `paragraphId`, ordinary `readToken` | Delete paragraph and content; tracking may preserve a revision |
+| `word_format_paragraph` | `paragraphId`, format `readToken`, `format` | Style, alignment and/or font edits |
+| `word_read_comments` | `paragraphId`, optional page | Comment threads/replies and token per thread |
+| `word_add_comment` | `paragraphId`, ordinary `readToken`, `text` | Add Office comment anchored to paragraph content |
+| `word_reply_comment` | `paragraphId`, `commentId`, thread `readToken`, `text` | Reply to thread |
+| `word_resolve_comment` | `paragraphId`, `commentId`, thread `readToken`, `resolved` | Resolve or reopen thread |
+| `word_get_change_tracking` | None | Document-wide mode and mode token |
+| `word_set_change_tracking` | Mode `readToken`, `mode` | Explicitly set `Off`, `TrackAll` or `TrackMineOnly` |
+| `word_read_tracked_changes` | `paragraphId` | Ordered revisions, Original/Current reviewed text and revision token |
+| `word_resolve_tracked_change` | `paragraphId`, revision `readToken`, `changeIndex`, `action` (`accept`/`reject`) | Resolve one inspected revision |
+
+All new Word tools require WordApi 1.6, already required for stable paragraph
+IDs. Discovery remains in the main body; headers, footers and text boxes are
+outside scope. Table indexes are positional, read-only references; relist after
+structural changes. Merged cells may produce unequal cell counts. Table
+inspection does not expose table editing.
+
+Whole-paragraph text is limited to 8,192 characters without paragraph/control
+characters. It bypasses the 255-character search limit but can replace inline
+formatting, links, fields and other rich content. Prefer `word_replace_text` for
+small corrections. Insertion/deletion/whole replacement invalidate earlier pane
+tokens; insertion/replacement return a fresh paragraph token. Word handles
+saving and tracks edits according to the document's current tracking mode.
+
+Word `format` accepts `style` (localized/custom name) OR `styleBuiltIn`,
+`alignment` (`Left`, `Centered`, `Right`, `Justified`) and `font` with the same
+fields as Excel. Supported built-in styles: Normal, Title, Subtitle,
+Heading1–Heading9, Quote, Caption and ListParagraph. Use built-in styles across
+Office languages. Formatting targets the complete paragraph; mixed inspection
+properties may be null/empty.
+
+Comments/replies accept single-line plain text up to 4,096 characters. Tokens
+compare paragraph text and the selected thread's metadata/replies. Each thread
+returns up to 20 replies, with `repliesTruncated`; truncated threads and
+paragraphs with more than 50 comments cannot be modified through reply/resolve.
+Use `comment.id` as `commentId`. No @mention markup is generated. Office controls
+normal collaboration notifications associated with comments.
+
+Tracking mode is a shared document setting, not an agent-local preference. No
+mode change or accept/reject operation happens implicitly. Revision reads allow
+up to 50 changes per paragraph; larger sets fail explicitly. Tokens compare the
+whole ordered list (author, date, text, type), paragraph text and Original/Current
+reviewed text. Resolution invalidates earlier pane tokens. These checks reduce
+accidental retargeting but cannot lock out coauthors atomically.
+
+All edit tokens expire after two minutes and are consumed on attempted writes.
+Comparison and mutation are separate Office batches; no operation claims atomic
+protection against another editor. After an uncertain write, inspect current
+state before deciding whether another write is needed.
+
+Reference APIs:
+[Excel ranges](https://learn.microsoft.com/en-us/javascript/api/excel/excel.range?view=excel-js-1.9),
+[Word paragraphs](https://learn.microsoft.com/en-us/javascript/api/word/word.paragraph?view=word-js-preview),
+[Word tables](https://learn.microsoft.com/en-us/javascript/api/word/word.table?view=word-js-preview),
+[comments](https://learn.microsoft.com/en-us/javascript/api/word/word.comment?view=word-js-preview),
+[tracked changes](https://learn.microsoft.com/en-us/javascript/api/word/word.trackedchange?view=word-js-preview).
 
 ## Run from source
 
@@ -235,6 +341,26 @@ provides document APIs inside an Office add-in; globals in the surrounding
 editor are not a supported substitute for that add-in context. The probe neither
 loads Office.js nor calls `Office.onReady`, `Excel.run` or `Word.run`.
 
+## Non-Office editor diagnostics
+
+`editor_list_frames` lists HTTPS frame IDs and origins, including file editors
+that the Word/Excel diagnostics do not recognize. It does not return document
+paths, names or full URLs. Only Microsoft-hosted origins are marked
+`inspectable`; third-party frames are listed by origin but are not probed.
+
+`editor_inspect_frame` takes a listed `frameId` and runs a fixed read-only probe
+for editor signatures: Monaco, CodeMirror, ProseMirror, Lexical, Slate, Quill,
+editable-element counts and limited adapter-handle presence. It returns only
+validated counts, booleans and allowlisted tag names. It does not read text,
+call editor/document/save methods, inspect storage or expose general JavaScript
+execution. Results are discarded if the frame navigates or detaches during the
+probe. Presence does not establish a working live-editing or coauthor bridge.
+
+These diagnostics help investigate the native SharePoint/OneDrive Markdown
+editor. They do not add Markdown edits yet. Restart Teams and reconnect the
+agent after updating the code, then open the test Markdown editor before
+listing/probing its frames.
+
 ## Local connection and implementation
 
 MCP is disabled by default and requires a restart when enabled or disabled. The
@@ -256,14 +382,15 @@ decision for future editing tools.
 `app/office/inspector.js` owns frame discovery and capability inspection.
 `app/office/liveBridge.js` finds our own task-pane frames under Excel/Word ancestors
 and sends structured commands through Electron's frame API. The Office.js
-operations run in `app/office/addin/operations.js` and `wordOperations.js`. The app does not inject
+operations run in `app/office/addin/operations.js`, `wordOperations.js` and
+`editingOperations.js`; `app/mcp/editingTools.js` registers the extended tools. The app does not inject
 Office.js into Microsoft's editor or expose arbitrary JavaScript execution as
 an MCP tool. Local-file servers are not used to overwrite coauthored documents.
 
 Run the focused checks with:
 
 ```sh
-node --test tests/unit/excelSession.test.js tests/unit/wordSession.test.js tests/unit/officeAddinHost.test.js tests/unit/officeLiveBridge.test.js tests/unit/officeInspector.test.js tests/unit/officeMcp.test.js
+node --test tests/unit/excelSession.test.js tests/unit/wordSession.test.js tests/unit/officeEditing.test.js tests/unit/officeAddinHost.test.js tests/unit/officeLiveBridge.test.js tests/unit/officeInspector.test.js tests/unit/officeMcp.test.js
 npm run lint
 ```
 
