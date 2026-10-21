@@ -25,7 +25,7 @@ async function findSocket(configHome) {
   throw error;
 }
 
-async function diagnoseOfficeMcp(socketPath) {
+async function withOfficeClient(socketPath, operation) {
   if (!path.isAbsolute(socketPath)) throw new Error("Socket path must be absolute");
   if (!(await fs.stat(socketPath)).isSocket()) {
     const error = new Error("MCP endpoint is not a socket");
@@ -45,13 +45,24 @@ async function diagnoseOfficeMcp(socketPath) {
     const match = /\b(ENOENT|ECONNREFUSED|EACCES|EPERM|ETIMEDOUT)\b/.exec(chunk.toString());
     if (match) connectionError = match[1];
   });
-  const call = async (name, args = {}) => {
-    const result = await client.callTool({ name, arguments: args }, { timeout: 5000 });
-    if (result.isError) throw new Error("Diagnostic tool failed");
-    return result.structuredContent;
-  };
   try {
     await client.connect(transport, { timeout: 5000 });
+    return await operation(client);
+  } catch (error) {
+    if (connectionError) error.code = connectionError;
+    throw error;
+  } finally {
+    await client.close();
+  }
+}
+
+async function diagnoseOfficeMcp(socketPath) {
+  return withOfficeClient(socketPath, async (client) => {
+    const call = async (name, args = {}) => {
+      const result = await client.callTool({ name, arguments: args }, { timeout: 5000 });
+      if (result.isError) throw new Error("Diagnostic tool failed");
+      return result.structuredContent;
+    };
     const listing = await call("office_list_editors");
     const editors = [];
     for (const editor of listing.editors) {
@@ -61,13 +72,10 @@ async function diagnoseOfficeMcp(socketPath) {
         editors.push({ ...editor, probeStatus: "unavailable", bridgeStatus: "not-connected" });
       }
     }
-    return { connected: true, editors, truncated: listing.truncated };
-  } catch (error) {
-    if (connectionError) error.code = connectionError;
-    throw error;
-  } finally {
-    await client.close();
-  }
+    const { tools } = await client.listTools({}, { timeout: 5000 });
+    const documents = tools.some((tool) => tool.name === "office_list_documents") ? await call("office_list_documents") : null;
+    return { connected: true, editors, truncated: listing.truncated, ...(documents ? { documents: documents.documents } : {}) };
+  });
 }
 
 async function main() {
@@ -108,4 +116,4 @@ async function main() {
 
 if (require.main === module) void main();
 
-module.exports = { diagnoseOfficeMcp, findSocket };
+module.exports = { diagnoseOfficeMcp, findSocket, withOfficeClient };

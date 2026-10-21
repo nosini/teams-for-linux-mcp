@@ -1,0 +1,7 @@
+:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+body { margin: 0; }
+main { padding: 20px; max-width: 36rem; }
+h1 { font-size: 1.25rem; margin: 0 0 20px; }
+p { line-height: 1.5; }
+#status { font-weight: 600; }
+button { padding: 8px 12px; font: inherit; cursor: pointer; }

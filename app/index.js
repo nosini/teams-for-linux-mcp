@@ -184,6 +184,7 @@ const profilesManager = new ProfilesManager(appConfig.settingsStore);
 let profileViewManager = null;
 let dbusControlService = null;
 let officeMcpEndpoint = null;
+let officeAddinHost = null;
 
 // ADR-020 Phase 2 unread aggregation; null with the flag off, where the
 // tray/badge handlers keep their single-sender behaviour.
@@ -247,6 +248,7 @@ if (gotTheLock) {
     if (officeMcpEndpoint) {
       void officeMcpEndpoint.close().catch(() => {});
     }
+    if (officeAddinHost) void officeAddinHost.close().catch(() => {});
     try {
       dbusControlService?.stop();
     } catch (error) {
@@ -810,12 +812,25 @@ async function handleAppReady() {
         const { createOfficeMcpServer } = require("./mcp/server");
         const { startLocalEndpoint } = require("./mcp/localEndpoint");
         const inspector = new OfficeInspector(() => webContents.getAllWebContents());
+        let liveBridge = null;
+        if (config.mcp.addin?.enabled === true) {
+          const { startAddinHost } = require("./office/addinHost");
+          const { LiveOfficeBridge } = require("./office/liveBridge");
+          officeAddinHost = await startAddinHost({
+            directory: path.join(app.getPath("userData"), "mcp"),
+            port: config.mcp.addin.port,
+          });
+          liveBridge = new LiveOfficeBridge(() => webContents.getAllWebContents(), officeAddinHost.origin);
+          console.info(`[MCP] Upload this Excel add-in manifest: ${officeAddinHost.manifestPath}`);
+        }
         officeMcpEndpoint = await startLocalEndpoint({
           directory: path.join(app.getPath("userData"), "mcp"),
-          createServer: () => createOfficeMcpServer(inspector),
+          createServer: () => createOfficeMcpServer(inspector, liveBridge),
         });
         console.info(`[MCP] Office diagnostics available at ${officeMcpEndpoint.socketPath}`);
       } catch (error) {
+        await officeAddinHost?.close();
+        officeAddinHost = null;
         // These are local startup/transport errors, never document content or
         // renderer exceptions. Keep their reason so startup is diagnosable.
         console.warn("[MCP] Office diagnostics could not start:", { message: error.message, code: error.code });
@@ -842,6 +857,13 @@ async function handleAppReady() {
 }
 
 function handleCertificateError(event, webContents, url, error, certificate, callback) {
+  // Only this app instance's own loopback service and exact leaf certificate.
+  // Other certificates continue through the existing corporate-CA handling.
+  if (officeAddinHost?.acceptsCertificate(url, error, certificate)) {
+    event.preventDefault();
+    callback(true);
+    return;
+  }
   certificateModule.onAppCertificateError({
     event,
     webContents,

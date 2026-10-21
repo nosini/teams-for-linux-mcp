@@ -29,13 +29,21 @@ const defaults = require("./defaults");
 
 module.exports = {
       mcp: {
-        default: { enabled: false },
-        describe: "Local MCP access to Office editor discovery and read-only capability diagnostics. Requires restart.",
+        default: { enabled: false, addin: { enabled: false, port: 39847 } },
+        describe: "Local MCP access to Office diagnostics and an optional Excel add-in bridge. Requires restart.",
         type: "object",
         fields: {
           enabled: {
             type: "boolean",
-            describe: "Expose Office diagnostics over a private Unix socket for local agents. Document reading and editing are not available yet.",
+            describe: "Expose Office diagnostics over a private Unix socket for local agents. Enable addin.enabled separately for live Excel tools.",
+          },
+          "addin.enabled": {
+            type: "boolean",
+            describe: "Serve the Excel task pane over loopback HTTPS and enable live workbook tools. Requires OpenSSL for local certificate creation and uploading the generated add-in manifest in Excel.",
+          },
+          "addin.port": {
+            type: "number",
+            describe: "Loopback HTTPS port for the Excel add-in (1024–65535). Changing it requires uploading the regenerated manifest again.",
           },
         },
         applyMode: "restart",

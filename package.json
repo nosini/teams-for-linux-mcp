@@ -22,6 +22,7 @@
     "postinstall": "electron-builder install-app-deps",
     "lint": "eslint .",
     "mcp:diagnose": "node scripts/diagnoseOfficeMcp.js",
+    "mcp:call": "node scripts/callOfficeMcp.js",
     "test:unit": "node --test 'tests/unit/*.test.js'",
     "test:e2e": "playwright test",
     "test:authenticated": "playwright test --config playwright.authenticated.config.js",
