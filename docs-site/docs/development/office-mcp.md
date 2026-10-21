@@ -57,7 +57,10 @@ For persistent configuration, merge this into the client's config.json:
 
 Changing the port requires uploading the regenerated manifest. Certificate and
 key files live under the private `mcp/addin` directory in the app's user data.
-Do not copy the private key or add that directory to source control.
+Do not copy the private key or add that directory to source control. The client
+replaces a pair that is missing, mismatched, readable by others or within a day
+of expiry. If the add-in host cannot start, the live Office tools are absent
+and the other MCP tools still start.
 
 ## Live Excel tools
 

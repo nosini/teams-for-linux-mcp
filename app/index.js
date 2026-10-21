@@ -816,15 +816,23 @@ async function handleAppReady() {
         const surfaceInspector = new SurfaceInspector(() => webContents.getAllWebContents());
         let liveBridge = null;
         if (config.mcp.addin?.enabled === true) {
-          const { startAddinHost } = require("./office/addinHost");
-          const { LiveOfficeBridge } = require("./office/liveBridge");
-          officeAddinHost = await startAddinHost({
-            directory: path.join(app.getPath("userData"), "mcp"),
-            port: config.mcp.addin.port,
-          });
-          liveBridge = new LiveOfficeBridge(() => webContents.getAllWebContents(), officeAddinHost.origin);
-          console.info(`[MCP] Upload this Excel add-in manifest: ${officeAddinHost.manifestPath}`);
-          console.info(`[MCP] Upload this Word add-in manifest: ${officeAddinHost.wordManifestPath}`);
+          // Without the add-in host only the live Office tools are missing;
+          // diagnostics, channel files and CodeMirror tools still start.
+          try {
+            const { startAddinHost } = require("./office/addinHost");
+            const { LiveOfficeBridge } = require("./office/liveBridge");
+            officeAddinHost = await startAddinHost({
+              directory: path.join(app.getPath("userData"), "mcp"),
+              port: config.mcp.addin.port,
+            });
+            liveBridge = new LiveOfficeBridge(() => webContents.getAllWebContents(), officeAddinHost.origin);
+            console.info(`[MCP] Upload this Excel add-in manifest: ${officeAddinHost.manifestPath}`);
+            console.info(`[MCP] Upload this Word add-in manifest: ${officeAddinHost.wordManifestPath}`);
+          } catch (error) {
+            await officeAddinHost?.close();
+            officeAddinHost = null;
+            console.warn("[MCP] Office add-in host could not start:", { message: error.message, code: error.code });
+          }
         }
         let channelFiles = null;
         if (config.mcp.files?.enabled === true) {

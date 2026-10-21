@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const https = require("node:https");
+const { execFile } = require("node:child_process");
+const { promisify } = require("node:util");
 const { startAddinHost } = require("../../app/office/addinHost");
 const { parseStringPromise } = require("xml2js");
 
@@ -76,5 +78,39 @@ describe("Office add-in HTTPS host", () => {
     const second = await startAddinHost({ directory, port: 0 });
     t.after(() => second.close());
     assert.equal(second.acceptsCertificate(second.origin, "net::ERR_CERT_AUTHORITY_INVALID", { data: cert.toString() }), true);
+  });
+
+  it("replaces an expiring, mismatched, exposed or unreadable certificate pair", async (t) => {
+    const { host, directory, cert } = await fixture(t);
+    const other = await fixture(t);
+    await host.close();
+    const certPath = path.join(directory, "addin/localhost.pem");
+    const keyPath = path.join(directory, "addin/localhost-key.pem");
+    const original = { cert, key: await fs.readFile(keyPath) };
+    const expiring = path.join(directory, "expiring");
+    await fs.mkdir(expiring);
+    await promisify(execFile)("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=localhost",
+      "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", path.join(expiring, "key.pem"), "-out", path.join(expiring, "cert.pem")]);
+    const cases = {
+      expiring: async () => {
+        await fs.copyFile(path.join(expiring, "cert.pem"), certPath);
+        await fs.copyFile(path.join(expiring, "key.pem"), keyPath);
+      },
+      mismatched: () => fs.copyFile(path.join(other.directory, "addin/localhost-key.pem"), keyPath),
+      exposed: () => fs.chmod(keyPath, 0o644),
+      unreadable: () => fs.writeFile(certPath, "invalid"),
+    };
+    for (const [name, damage] of Object.entries(cases)) {
+      await fs.writeFile(certPath, original.cert);
+      await fs.writeFile(keyPath, original.key, { mode: 0o600 });
+      await fs.chmod(keyPath, 0o600);
+      await damage();
+      const replaced = await startAddinHost({ directory, port: 0 });
+      await replaced.close();
+      const fresh = await fs.readFile(certPath);
+      assert.ok(!fresh.equals(original.cert), name);
+      assert.equal(replaced.acceptsCertificate(replaced.origin, "net::ERR_CERT_AUTHORITY_INVALID", { data: fresh.toString() }), true, name);
+      assert.equal((await fs.stat(keyPath)).mode & 0o777, 0o600, name);
+    }
   });
 });

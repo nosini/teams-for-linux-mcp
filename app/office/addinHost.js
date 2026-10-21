@@ -24,11 +24,19 @@ async function credentials(directory) {
     }
     return { cert, key, certificate };
   };
-  try { return await read(); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  // The pair is pinned only in memory for this process, so a missing, expiring,
+  // mismatched or exposed pair (including one left half-replaced by a crash
+  // between the renames below) is simply replaced.
+  try { return await read(); } catch { /* Generate a new pair. */ }
   const temporary = await fs.mkdtemp(path.join(directory, "generate-"));
   try {
-    await runFile("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "365", "-subj", "/CN=localhost",
-      "-addext", "subjectAltName=IP:127.0.0.1,DNS:localhost", "-keyout", path.join(temporary, "key.pem"), "-out", path.join(temporary, "cert.pem")]);
+    try {
+      await runFile("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "365", "-subj", "/CN=localhost",
+        "-addext", "subjectAltName=IP:127.0.0.1,DNS:localhost", "-keyout", path.join(temporary, "key.pem"), "-out", path.join(temporary, "cert.pem")]);
+    } catch (error) {
+      // The OpenSSL failure message repeats the command line, including paths in the user's home.
+      throw Object.assign(new Error("Could not generate the local add-in certificate with OpenSSL"), { code: error.code });
+    }
     await fs.chmod(path.join(temporary, "key.pem"), 0o600);
     await fs.rename(path.join(temporary, "key.pem"), keyPath);
     await fs.rename(path.join(temporary, "cert.pem"), certPath);
