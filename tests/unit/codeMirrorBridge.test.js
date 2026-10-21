@@ -134,6 +134,23 @@ describe("Native CodeMirror bridge", () => {
     await assert.rejects(timed.bridge.execute("read", { editorId: target.editorId }), /timed out/);
   });
 
+  it("lists editors while a read runs in the same frame and keeps reads exclusive", async () => {
+    const { bridge, frame, list } = fixture("Hello");
+    const { editors: [editor] } = await list();
+    const evaluate = frame.executeJavaScript;
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    frame.executeJavaScript = async (source, gesture) => { frame.executeJavaScript = evaluate; await gate; return evaluate(source, gesture); };
+    const reading = bridge.execute("read", { editorId: editor.id });
+    const listed = await list();
+    assert.deepEqual(listed.editors.map(({ id }) => id), [editor.id]);
+    assert.deepEqual(listed.unavailableFrames, []);
+    await assert.rejects(bridge.execute("read", { editorId: editor.id }), /Another command is running/);
+    release();
+    assert.equal((await reading).text, "Hello");
+    assert.equal((await bridge.execute("read", { editorId: editor.id })).text, "Hello");
+  });
+
   it("supports the full flow through the official MCP client and rejects caller scripts", async (t) => {
     const { bridge, model } = fixture("Hello");
     const root = path.resolve(__dirname, "../../test-results/mcp");

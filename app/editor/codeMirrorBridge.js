@@ -9,6 +9,7 @@ const messages = {
   READ_ONLY: "This editor is read-only.",
   COMPOSING: "The user is composing text. Wait until composition finishes before editing.",
   EDIT_NOT_CONFIRMED: "The editor did not confirm the exact requested text. It may have filtered or deferred the edit. Read the current text before deciding whether to write again.",
+  BUSY: "Another command is running in this editor. Wait for it to finish before reading or writing again.",
   INTERNAL: "The CodeMirror operation failed. Read the current text before deciding whether to write again.",
 };
 function allowedFrame(frame) {
@@ -29,8 +30,11 @@ class CodeMirrorBridge {
   }
   async command(frame, url, operation, args = {}) {
     if (!allowedFrame(frame) || frame.url !== url) throw new Error(messages.UNAVAILABLE);
-    if (this.busy.has(frame)) throw new Error("Another command is running in this editor frame.");
-    this.busy.add(frame);
+    // The page command runs synchronously, so discovery cannot interleave with
+    // a read or replace. Only those wait for an earlier outcome in this frame.
+    const exclusive = operation !== "list";
+    if (exclusive && this.busy.has(frame)) throw new Error(messages.BUSY);
+    if (exclusive) this.busy.add(frame);
     let timer;
     try {
       const request = { registryKey: this.registryKey, operation, args, deadline: this.now() + this.timeoutMs - Math.min(500, this.timeoutMs / 5) };
@@ -47,7 +51,10 @@ class CodeMirrorBridge {
       // Fetch/evaluation causes can contain document text or signed URLs.
       // eslint-disable-next-line preserve-caught-error
       throw new Error(messages.INTERNAL);
-    } finally { clearTimeout(timer); this.busy.delete(frame); }
+    } finally {
+      clearTimeout(timer);
+      if (exclusive) this.busy.delete(frame);
+    }
   }
 
   async listEditors() {
