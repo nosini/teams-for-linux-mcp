@@ -3,10 +3,11 @@ const { editing } = require("./addin/operations");
 const { messages } = require("./addin/operations");
 
 class LiveOfficeBridge {
-  constructor(getWebContents, origin, { timeoutMs = 15000 } = {}) {
+  constructor(getWebContents, origin, { timeoutMs = 15000, probeTimeoutMs = 2000 } = {}) {
     this.getWebContents = getWebContents;
     this.origin = origin;
     this.timeoutMs = timeoutMs;
+    this.probeTimeoutMs = probeTimeoutMs;
     this.documents = new Map();
     this.busy = new Set();
   }
@@ -25,29 +26,36 @@ class LiveOfficeBridge {
 
   isAddin(frame) { return !!this.applicationOf(frame); }
 
-  async evaluate(frame, source) {
+  async evaluate(frame, source, timeoutMs = this.timeoutMs) {
     let timer;
     try {
       return await Promise.race([
         frame.executeJavaScript(source, false),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(messages.TIMEOUT)), this.timeoutMs); }),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(messages.TIMEOUT)), timeoutMs); }),
       ]);
     } finally { clearTimeout(timer); }
   }
 
   async listDocuments() {
-    const found = new Map();
+    const candidates = [];
     for (const contents of this.getWebContents()) {
       try {
         if (contents.isDestroyed()) continue;
         for (const frame of contents.mainFrame.framesInSubtree) {
-          if (found.size >= 32 || !this.isAddin(frame)) continue;
-          try {
-            const info = await this.evaluate(frame, "globalThis.TeamsOfficeBridge?.describe()");
-            if (info?.ready === true && ["excel", "word"].includes(info.application) && info.application === this.applicationOf(frame) && /^[a-f0-9-]{36}$/i.test(info.documentId)) {
-              found.set(info.documentId, { frame, id: info.documentId, name: typeof info.name === "string" ? info.name.slice(0, 256) : "Office document", application: info.application, webContentsId: contents.id });
-            }
-          } catch { /* An add-in may still be initializing. */ }
+          if (candidates.length < 64 && this.isAddin(frame)) candidates.push({ frame, contents });
+        }
+      } catch { /* Window closed during discovery. */ }
+    }
+    // describe() only reads task-pane state. Probe panes in parallel with a
+    // short deadline so a stalled or still-loading pane cannot delay the rest.
+    const results = await Promise.allSettled(candidates.map(({ frame }) =>
+      this.evaluate(frame, "globalThis.TeamsOfficeBridge?.describe()", this.probeTimeoutMs)));
+    const found = new Map();
+    for (let index = 0; index < results.length && found.size < 32; index++) {
+      const { frame, contents } = candidates[index], info = results[index].value;
+      try {
+        if (info?.ready === true && ["excel", "word"].includes(info.application) && info.application === this.applicationOf(frame) && /^[a-f0-9-]{36}$/i.test(info.documentId)) {
+          found.set(info.documentId, { frame, id: info.documentId, name: typeof info.name === "string" ? info.name.slice(0, 256) : "Office document", application: info.application, webContentsId: contents.id });
         }
       } catch { /* Window closed during discovery. */ }
     }

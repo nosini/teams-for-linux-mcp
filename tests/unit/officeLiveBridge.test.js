@@ -65,6 +65,17 @@ describe("Live Office bridge", () => {
     await assert.rejects(bridge.execute(id, "read_paragraph", before), (error) => /Word could not complete/.test(error.message) && !error.message.includes("private"));
   });
 
+  it("probes task panes in parallel so stalled panes do not delay discovery", async () => {
+    const { frame, id } = fixture();
+    const stalled = Array.from({ length: 3 }, () => ({ ...frame, executeJavaScript: () => new Promise(() => {}) }));
+    const contents = [{ id: 1, isDestroyed: () => false, mainFrame: { framesInSubtree: [...stalled, frame] } }];
+    const bridge = new LiveOfficeBridge(() => contents, "https://127.0.0.1:39847", { timeoutMs: 1000, probeTimeoutMs: 200 });
+    const started = Date.now();
+    const { documents } = await bridge.listDocuments();
+    assert.ok(Date.now() - started < 800);
+    assert.deepEqual(documents.map((document) => document.id), [id]);
+  });
+
   it("requires discovery and targets only the local task pane under an Excel ancestor", async () => {
     const { bridge, frame, id } = fixture();
     await assert.rejects(bridge.execute(id, "list_worksheets", {}), /document changed/);
