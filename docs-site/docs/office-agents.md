@@ -234,7 +234,9 @@ folder, and list its files. The tools are `teams_list_teams`,
 If team/channel discovery is denied, the agent can still try resolving the file
 folder with team and channel IDs from a Teams channel link you provide.
 
-Transfers use base64 bytes and are limited to **1 MiB per file**. These tools can
+Single-call transfers use base64 bytes and are limited to **1 MiB per file**.
+Larger files use the chunked tools below, without a bridge-level total file size
+limit; Microsoft storage limits and the session's permissions still apply. These tools can
 read binary formats, but interpreting or modifying a DOCX/XLSX package requires
 format-aware tooling. Use the existing Word/Excel tools for edits in open Office
 documents. Replacement uploads replace the complete file, rather than merging
@@ -244,6 +246,72 @@ conflict-failure behavior still require live validation against your tenant;
 coordinate edits while testing. Do not automatically repeat a timed-out upload:
 list/read the destination first to determine whether it succeeded.
 
+### Chunked downloads and uploads
+
+| Tool | Purpose |
+| --- | --- |
+| `teams_begin_download` | Bind a download to a selected `driveId`, `itemId`, size and eTag. |
+| `teams_read_file_chunk` | Read the next byte range as base64, with a chunk SHA-256. |
+| `teams_begin_upload` | Create an upload session for a fixed positive total byte size. |
+| `teams_upload_chunk` | Send the next sequential base64 fragment. |
+| `teams_get_transfer` | Inspect progress and reconcile uncertain chunk requests. |
+| `teams_finish_upload` | Explicitly publish the staged file. |
+| `teams_cancel_transfer` | Stop a download or cancel unfinished upload staging. |
+
+For a download, begin with `driveId` and `itemId`, then pass its `transferId` and
+`nextOffset` to `teams_read_file_chunk` until `done` is true. Decode each chunk
+and concatenate the bytes in offset order. Each chunk contains up to **640 KiB**
+of raw bytes, keeping MCP messages within the existing transport limit. The
+server requests exact HTTP byte ranges and checks the original eTag and size
+before and after each range. If the file changes, discard all assembled bytes
+and begin again. The most recent chunk can be reread after a lost response.
+
+For an upload, begin with `driveId`, total `size` in bytes, and either
+`parentId` + `name` to create a new file, or `itemId` + `expectedETag` to replace
+one. Creation requests conflict failure. Optionally provide `expectedSha256`
+(the SHA-256 of the complete source bytes). Send chunks at `nextOffset`, at most
+640 KiB each; every nonfinal chunk must be a multiple of 320 KiB. The server
+checks the source hash before sending the final fragment, then reports it as
+`sourceSha256`. Empty files use the single-call tools.
+
+The server requests Microsoft's deferred commit mode: the final chunk normally
+returns `ready`, then `teams_finish_upload` publishes the file. If session
+creation is rejected with a definite HTTP 400, the server tries once without the
+optional deferred-commit property. This fallback returns `commitMode: automatic`:
+**the final chunk publishes the file**. The normal mode is `commitMode: deferred`.
+Conflict failure and eTag preconditions remain in both session requests. The
+request serializer puts OData annotations before ordinary properties, as required
+by affected SharePoint parsers ([Microsoft SDK issue](https://github.com/microsoftgraph/msgraph-sdk-java/issues/1351)). There
+is no fallback after a timeout, conflict, or fragment/commit failure. If Microsoft
+instead reports that a fragment already published the file, the transfer returns
+`completed` and finish will not publish it again. Replacement rechecks the
+original eTag before each fragment and immediately before finish, and sends
+`If-Match` when creating and finishing the session. This is not an atomic lock
+against coauthors. Deferred commit was verified in one SharePoint tenant with
+a disposable binary file; validate your own tenant and file types before relying
+on the same behavior.
+SharePoint can rewrite Office package metadata, so `sourceSha256` verifies the
+uploaded source rather than promising an identical hash for the saved package.
+Use the live editing tools for collaboration in open documents.
+
+After a chunk request fails, call `teams_get_transfer` before continuing. It
+queries Microsoft's progress and reconciles whether that chunk was accepted.
+An identical repeat of the last acknowledged chunk returns its receipt without
+sending it again. An uncertain finish is never automatically retried. If a
+session disappears, inspect the destination: disappearance can mean expiration
+or successful publication. Cancelling cannot delete or revert a saved file.
+
+Transfer IDs survive agent reconnects while Teams remains running, expire after
+30 idle minutes (or Microsoft's earlier expiry), and are lost on Teams restart.
+Up to eight transfers can be active at once. Completed receipts remain available
+for ten minutes. Only one operation can run on a given transfer at a time.
+The server retains at most one pending chunk per upload, with no local temporary
+file or whole-file buffer. Provider staging expires separately if a local
+transfer is abandoned. Temporary upload/download URLs remain inside Teams and
+requests to those URLs never carry the Graph bearer token. See Microsoft's
+[upload session protocol](https://learn.microsoft.com/en-us/graph/api/driveitem-createuploadsession?view=graph-rest-1.0)
+and [ranged download instructions](https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0).
+
 The server reuses the signed-in Teams session. It does not request new Microsoft
 permissions and does not expose its access token or temporary download links to
 the agent. HTTP 403 means the session lacks permission or organization policy
@@ -252,6 +320,14 @@ Discovery, reading and writing can have different permissions. Microsoft's
 [folder lookup](https://learn.microsoft.com/en-us/graph/api/channel-get-filesfolder?view=graph-rest-1.0)
 and [upload documentation](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0)
 list the required permissions.
+
+A live SharePoint test on 2026-10-21 verified a 1,310,737-byte binary upload in
+three chunks, explicit deferred commit, byte-for-byte download and SHA-256,
+replacement using a fresh eTag followed by another verified download, stale
+eTag rejection, and cancellation after staging the first chunk with no resulting
+file. A separate 7,995,415-byte download passed in thirteen chunks. These tests
+do not establish an atomic coauthor lock, live network-failure recovery,
+create-name conflict handling, or Office-package byte preservation.
 
 For a first live test, choose a test channel, list its files, then ask the agent
 to create a uniquely named `mcp-file-test.txt`, read it back, replace it using the

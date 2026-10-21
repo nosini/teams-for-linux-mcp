@@ -1,0 +1,12 @@
+const { z } = require("zod");
+const LIMIT = 1024 * 1024;
+const BASE = "https://graph.microsoft.com/v1.0";
+const itemFields = "id,name,size,eTag,file,folder,parentReference,lastModifiedDateTime";
+const pickItem = (data) => Object.fromEntries(itemFields.split(",").filter((key) => key in data).map((key) => [key, data[key]]));
+const segment = (value) => encodeURIComponent(value);
+const hasControl = (value) => [...value].some((character) => character.charCodeAt(0) < 32);
+const id = z.string().min(1).max(256).refine((value) => !hasControl(value) && !/[ /\\?#]/.test(value) && value !== "." && value !== "..");
+const filename = z.string().min(1).max(255).refine((value) => !hasControl(value) && !/["*:<>?/\\|]/.test(value) && !/[. ]$/.test(value) && value !== "." && value !== "..");
+const eTag = z.string().min(1).max(256).refine((value) => value !== "*" && !hasControl(value));
+const base64 = (bytes) => z.string().max(4 * Math.ceil(bytes / 3)).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/);
+module.exports = { LIMIT, BASE, itemFields, pickItem, segment, id, filename, eTag, base64 };

@@ -66,6 +66,13 @@ describe("Teams channel files", () => {
     await assert.rejects(invalid.files.json(`${base}/me`), { message: "Invalid Graph JSON response" });
   });
 
+  it("reports only fixed diagnostic labels from bounded Microsoft error bodies", async () => {
+    const { files } = setup([Response.json({ error: { code: "invalidRequest", message: "deferCommit not supported: https://host/?secret=token-value" } }, { status: 400 })]);
+    await assert.rejects(files.json(`${base}/me`), { message: "File request failed (HTTP 400). Microsoft diagnostic: invalidRequest, defercommit, token, not supported." });
+    const malicious = setup([Response.json({ error: { code: "secret-token", message: "https://secret.test/?credential=value" } }, { status: 400 })]);
+    await assert.rejects(malicious.files.json(`${base}/me`), { message: "File request failed (HTTP 400)." });
+  });
+
   it("paginates with an opaque cursor and retains the selected folder", async () => {
     const { files, calls } = setup([{ value: [{ ...item, "@microsoft.graph.downloadUrl": "secret-download" }], "@odata.nextLink": `${base}/drives/d/items/p/children?$skiptoken=abc%2Bdef` }, { value: [] }]);
     const endpoint = "/drives/d/items/p/children?$top=50";
@@ -79,7 +86,7 @@ describe("Teams channel files", () => {
   it("validates file names, base64, identifiers and write preconditions at the MCP boundary", async () => {
     const tools = new Map();
     registerChannelFileTools({ registerTool: (name, options, handler) => tools.set(name, { ...options, handler }) }, setup([]).files);
-    assert.equal(tools.size, 7);
+    assert.equal(tools.size, 14);
     const create = tools.get("teams_create_file");
     const args = { driveId: "d", parentId: "p", name: "test.txt", contentBase64: "" };
     assert.ok(create.inputSchema.safeParse(args).success);

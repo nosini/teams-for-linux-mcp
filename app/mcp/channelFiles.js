@@ -1,21 +1,20 @@
 const { z } = require("zod");
 
-const LIMIT = 1024 * 1024;
-const BASE = "https://graph.microsoft.com/v1.0";
-const itemFields = "id,name,size,eTag,file,folder,parentReference,lastModifiedDateTime";
-const pickItem = (data) => Object.fromEntries(itemFields.split(",").filter((key) => key in data).map((key) => [key, data[key]]));
-const segment = (value) => encodeURIComponent(value);
-const hasControl = (value) => [...value].some((character) => character.charCodeAt(0) < 32);
-const id = z.string().min(1).max(256).refine((value) => !hasControl(value) && !/[ /\\?#]/.test(value) && value !== "." && value !== "..");
+const { LIMIT, BASE, itemFields, pickItem, segment, id, filename, eTag, base64 } = require("./channelFileTypes");
+class FileRequestError extends Error {
+  constructor(message, status) { super(message); this.status = status; }
+}
 
 // Neither Graph tokens nor preauthenticated download URLs cross the MCP boundary.
 class ChannelFiles {
   constructor(graph, fetcher = globalThis.fetch) {
     this.graph = graph;
     this.fetch = fetcher;
+    const { FileTransfers } = require("./fileTransfers");
+    this.transfers = new FileTransfers(this);
   }
 
-  async request(endpoint, options = {}, authenticated = true) {
+  async request(endpoint, options = {}, authenticated = true, responseOptions = {}) {
     const url = new URL(endpoint, `${BASE}/`);
     if (authenticated && (url.origin !== "https://graph.microsoft.com" || !url.pathname.startsWith("/v1.0/"))) {
       throw new Error("Invalid Graph endpoint");
@@ -34,10 +33,26 @@ class ChannelFiles {
         ...options, redirect: "manual", signal: controller.signal,
         headers: { ...options.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
-      if (!response.ok && response.status !== 302) {
-        await response.body?.cancel();
+      if (!response.ok && response.status !== 302 && !responseOptions.allowStatus?.includes(response.status)) {
+        // Only fixed diagnostic labels cross MCP, never arbitrary server text:
+        // error messages may echo a preauthenticated URL or access token.
+        let diagnostic = "";
+        try {
+          const chunks = []; let size = 0;
+          for await (const chunk of response.body || []) {
+            size += chunk.length;
+            if (size > 65536) break;
+            chunks.push(chunk);
+          }
+          const data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          const knownCodes = new Set(["invalidRequest", "badRequest", "notSupported", "accessDenied", "unauthenticated", "itemNotFound", "nameAlreadyExists", "resourceModified", "invalidRange", "quotaLimitReached", "generalException"]);
+          const code = knownCodes.has(data.error?.code) ? data.error.code : null;
+          const message = typeof data.error?.message === "string" ? data.error.message.toLowerCase() : "";
+          const topics = ["defercommit", "conflict", "name", "permission", "token", "json", "not supported"].filter((word) => message.includes(word));
+          if (code || topics.length) diagnostic = ` Microsoft diagnostic: ${[code, ...topics].filter(Boolean).join(", ")}.`;
+        } catch { /* Error bodies are optional and untrusted. */ }
         const hint = response.status === 403 ? " Teams' session lacks permission, or tenant policy blocks this operation." : "";
-        throw new Error(`File request failed (HTTP ${response.status}).${hint}`);
+        throw new FileRequestError(`File request failed (HTTP ${response.status}).${hint}${diagnostic}`, response.status);
       }
       if (response.status === 302) {
         await response.body?.cancel();
@@ -47,12 +62,13 @@ class ChannelFiles {
       let size = 0;
       for await (const chunk of response.body || []) {
         size += chunk.length;
-        if (size > 2 * LIMIT) throw new Error("Response exceeds the transfer limit.");
+        if (size > (responseOptions.maxBytes ?? 2 * LIMIT)) throw new FileRequestError("Response exceeds the transfer limit.");
         chunks.push(chunk);
       }
-      return Buffer.concat(chunks);
+      const body = Buffer.concat(chunks);
+      return responseOptions.details ? { body, status: response.status, headers: response.headers } : body;
     } catch (error) {
-      if (/^(File request failed|Response exceeds)/.test(error.message)) throw error;
+      if (error instanceof FileRequestError) throw error;
       // Drop fetch causes because they can contain preauthenticated URLs.
       // eslint-disable-next-line preserve-caught-error
       throw new Error("File transfer failed or timed out. For writes, inspect the destination before retrying.");
@@ -89,7 +105,7 @@ class ChannelFiles {
     const path = this.itemPath(driveId, itemId);
     const before = await this.json(`${path}?$select=${itemFields}`);
     if (!before.file) throw new Error("Select a file, not a folder.");
-    if (before.size > LIMIT) throw new Error("Files are limited to 1 MiB per transfer.");
+    if (before.size > LIMIT) throw new Error("Use teams_begin_download and teams_read_file_chunk for files larger than 1 MiB.");
     let bytes = await this.request(`${path}/content`);
     if (!Buffer.isBuffer(bytes)) {
       if (!bytes.redirect) throw new Error("Missing download location");
@@ -136,10 +152,11 @@ function registerChannelFileTools(server, files) {
     return { item: pickItem(data) };
   });
   register("teams_list_files", "List children of a selected channel folder or subfolder. Pass nextCursor as cursor to continue.", { driveId: id, folderId: id, cursor }, ({ driveId, folderId, cursor }) => files.list(`/drives/${segment(driveId)}/items/${segment(folderId)}/children?$select=${itemFields}&$top=50`, cursor));
-  register("teams_read_file", "Download an explicitly selected file, up to 1 MiB, as base64 with its eTag. Decode as appropriate for its format. Word/Excel editing in an open document is available through the separate Office tools.", { driveId: id, itemId: id }, (args) => files.read(args));
-  const contentBase64 = z.string().max(4 * Math.ceil(LIMIT / 3)).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/);
-  register("teams_create_file", "Upload a new file of up to 1 MiB to a selected folder using base64 bytes. Requests conflict failure rather than overwriting an existing name. Do not automatically retry uncertain writes; list and read back first.", { driveId: id, parentId: id, name: z.string().min(1).max(255).refine((value) => !hasControl(value) && !/["*:<>?/\\|]/.test(value) && !/[. ]$/.test(value) && value !== "." && value !== ".."), contentBase64 }, (args) => files.write(args), true);
-  register("teams_replace_file", "Replace the entire contents of a selected file with up to 1 MiB of base64 bytes. Requires the exact eTag from a recent read, checks it and sends If-Match. Concurrent-save protection needs live validation; coordinate edits. This replaces the complete file, including Office packages. Do not automatically retry uncertain writes; read back first.", { driveId: id, itemId: id, expectedETag: z.string().min(1).max(256).refine((value) => value !== "*" && !/[\r\n]/.test(value)), contentBase64 }, (args) => files.write(args), true);
+  register("teams_read_file", "For files larger than 1 MiB use teams_begin_download / teams_read_file_chunk. Download an explicitly selected file, up to 1 MiB, as base64 with its eTag. Decode as appropriate for its format. Word/Excel editing in an open document is available through the separate Office tools.", { driveId: id, itemId: id }, (args) => files.read(args));
+  const contentBase64 = base64(LIMIT);
+  register("teams_create_file", "For larger files use teams_begin_upload / teams_upload_chunk / teams_finish_upload. Upload a new file of up to 1 MiB to a selected folder using base64 bytes. Requests conflict failure rather than overwriting an existing name. Do not automatically retry uncertain writes; list and read back first.", { driveId: id, parentId: id, name: filename, contentBase64 }, (args) => files.write(args), true);
+  register("teams_replace_file", "For larger files use teams_begin_upload / teams_upload_chunk / teams_finish_upload. Replace the entire contents of a selected file with up to 1 MiB of base64 bytes. Requires the exact eTag from a recent read, checks it and sends If-Match. Concurrent-save protection needs live validation; coordinate edits. This replaces the complete file, including Office packages. Do not automatically retry uncertain writes; read back first.", { driveId: id, itemId: id, expectedETag: eTag, contentBase64 }, (args) => files.write(args), true);
+  require("./fileTransfers").registerTransferTools(server, files.transfers);
 }
 
 module.exports = { ChannelFiles, registerChannelFileTools, LIMIT };

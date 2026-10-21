@@ -238,7 +238,7 @@ describe("Office MCP endpoint", { timeout: 10000 }, () => {
     t.after(async () => { client.close(); socket.destroy(); await endpoint.close(); });
     await initialize(client);
     const listing = await client.request("tools/list");
-    assert.equal(listing.result.tools.filter((tool) => tool.name.startsWith("teams_")).length, 7);
+    assert.equal(listing.result.tools.filter((tool) => tool.name.startsWith("teams_")).length, 14);
     const bytes = Buffer.alloc(128 * 1024, 65);
     const response = await client.request("tools/call", { name: "teams_create_file", arguments: { driveId: "d", parentId: "p", name: "test.txt", contentBase64: bytes.toString("base64") } });
     assert.equal(response.result.isError, undefined);
@@ -248,6 +248,60 @@ describe("Office MCP endpoint", { timeout: 10000 }, () => {
     const invalid = await client.request("tools/call", { name: "teams_create_file", arguments: { driveId: "d", parentId: "p", name: "../bad", contentBase64: "" } });
     assert.ok(invalid.error || invalid.result?.isError);
     assert.equal(uploaded.length, 1);
+  });
+
+  it("round-trips a file larger than 1 MiB in chunks through the MCP socket", async (t) => {
+    const { ChannelFiles } = require("../../app/mcp/channelFiles");
+    const { CHUNK_SIZE } = require("../../app/mcp/fileTransfers");
+    const directory = await testDirectory(t);
+    const source = Buffer.alloc(CHUNK_SIZE * 2 + 17, 93), received = [];
+    let stored, published = false;
+    const item = { id: "file", name: "chunked.bin", size: source.length, eTag: '"one"', file: {} };
+    const files = new ChannelFiles({ acquireToken: async () => ({ success: true, token: "private-token" }) }, async (url, options) => {
+      if (url.endsWith("/createUploadSession")) return Response.json({ uploadUrl: "https://tenant.sharepoint.com/upload?private=session", expirationDateTime: new Date(Date.now() + 3600000).toISOString() });
+      if (url.includes("sharepoint")) {
+        assert.equal(options.headers.Authorization, undefined);
+        if (options.method === "PUT") {
+          received.push(options.body);
+          const offset = Buffer.concat(received).length;
+          return Response.json({ nextExpectedRanges: offset === source.length ? [] : [`${offset}-${source.length - 1}`] }, { status: 202 });
+        }
+        if (options.method === "POST") {
+          stored = Buffer.concat(received); published = true;
+          return Response.json(item, { status: 201 });
+        }
+        const [, start, end] = /^bytes=(\d+)-(\d+)$/.exec(options.headers.Range);
+        return new Response(stored.subarray(Number(start), Number(end) + 1), { status: 206, headers: { "Content-Range": `bytes ${start}-${end}/${stored.length}` } });
+      }
+      assert.equal(published, true);
+      return Response.json({ ...item, "@microsoft.graph.downloadUrl": "https://tenant.sharepoint.com/download?private=link" });
+    });
+    const endpoint = await startLocalEndpoint({ directory, createServer: () => createOfficeMcpServer(new OfficeInspector(() => []), null, files) });
+    const socket = net.createConnection(endpoint.socketPath);
+    await once(socket, "connect");
+    const client = rpcReader(socket, socket);
+    t.after(async () => { client.close(); socket.destroy(); await endpoint.close(); });
+    await initialize(client);
+    const call = async (name, args) => {
+      const response = await client.request("tools/call", { name, arguments: args });
+      assert.equal(response.error, undefined);
+      assert.equal(response.result.isError, undefined, JSON.stringify(response));
+      assert.doesNotMatch(JSON.stringify(response), /private/);
+      return response.result.structuredContent;
+    };
+    const upload = await call("teams_begin_upload", { driveId: "d", parentId: "p", name: "chunked.bin", size: source.length });
+    for (let offset = 0; offset < source.length; offset += CHUNK_SIZE) await call("teams_upload_chunk", { transferId: upload.transferId, offset, contentBase64: source.subarray(offset, offset + CHUNK_SIZE).toString("base64") });
+    assert.equal(published, false);
+    assert.equal((await call("teams_finish_upload", { transferId: upload.transferId })).status, "completed");
+    assert.deepEqual(stored, source);
+    const download = await call("teams_begin_download", { driveId: "d", itemId: "file" });
+    const chunks = [];
+    for (let offset = 0; offset < source.length;) {
+      const chunk = await call("teams_read_file_chunk", { transferId: download.transferId, offset });
+      chunks.push(Buffer.from(chunk.contentBase64, "base64"));
+      offset = chunk.nextOffset;
+    }
+    assert.deepEqual(Buffer.concat(chunks), source);
   });
 
   it("fails the stdio adapter clearly when Teams is not running", async (t) => {

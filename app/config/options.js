@@ -43,7 +43,7 @@ module.exports = {
           },
           "files.enabled": {
             type: "boolean",
-            describe: "Expose channel file discovery, downloads and uploads using the signed-in Teams session. Requires mcp.enabled and restart. Limited by the existing Microsoft permissions; file transfers are capped at 1 MiB. Grants local MCP agents file write access. No Office add-in required.",
+            describe: "Expose channel file discovery, downloads and uploads using the signed-in Teams session. Requires mcp.enabled and restart. Limited by the existing Microsoft permissions; single-call transfers are capped at 1 MiB; larger files use 640 KiB chunks. Grants local MCP agents file write access. No Office add-in required.",
           },
           "addin.enabled": {
             type: "boolean",
