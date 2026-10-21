@@ -24,8 +24,9 @@ To enable it on subsequent launches, merge this setting into Teams' existing
 { "mcp": { "enabled": true, "addin": { "enabled": true } } }
 ```
 
-OpenSSL must be installed for the first launch. Startup prints the exact socket
-and add-in manifest paths. Source launches normally use `~/.config/Electron/mcp`;
+OpenSSL must be installed for the first launch. Startup prints the socket and
+add-in manifest paths, with your home directory shown as `~` so the log does
+not record your account name. Source launches normally use `~/.config/Electron/mcp`;
 packaged launches normally use `~/.config/teams-for-linux/mcp`. Use the printed
 paths when you have a custom profile.
 

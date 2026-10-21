@@ -21,6 +21,7 @@ const { allowedChannels } = require("./security/ipcValidator");
 const { installIpcSecurity } = require("./security/ipcSecurity");
 const { installWebviewGuard } = require("./security/webviewGuard");
 const { sanitize: sanitizePii } = require("./utils/logSanitizer");
+const { tildify } = require("./utils/homePath");
 const { isPreLoginAuthNoise, parseChunkLoadFailure, formatChunkLoadWarning } = require("./utils/rendererErrors");
 const { register: registerGlobalShortcuts, sendKeyboardEventToWindow } = require("./globalShortcuts");
 const CommandLineManager = require("./startup/commandLine");
@@ -826,12 +827,12 @@ async function handleAppReady() {
               port: config.mcp.addin.port,
             });
             liveBridge = new LiveOfficeBridge(() => webContents.getAllWebContents(), officeAddinHost.origin);
-            console.info(`[MCP] Upload this Excel add-in manifest: ${officeAddinHost.manifestPath}`);
-            console.info(`[MCP] Upload this Word add-in manifest: ${officeAddinHost.wordManifestPath}`);
+            console.info(`[MCP] Upload this Excel add-in manifest: ${tildify(officeAddinHost.manifestPath)}`);
+            console.info(`[MCP] Upload this Word add-in manifest: ${tildify(officeAddinHost.wordManifestPath)}`);
           } catch (error) {
             await officeAddinHost?.close();
             officeAddinHost = null;
-            console.warn("[MCP] Office add-in host could not start:", { message: error.message, code: error.code });
+            console.warn("[MCP] Office add-in host could not start:", { message: tildify(error.message), code: error.code });
           }
         }
         let channelFiles = null;
@@ -850,13 +851,13 @@ async function handleAppReady() {
           directory: path.join(app.getPath("userData"), "mcp"),
           createServer: () => createOfficeMcpServer(inspector, liveBridge, channelFiles, surfaceInspector, codeMirrorBridge),
         });
-        console.info(`[MCP] Office diagnostics available at ${officeMcpEndpoint.socketPath}`);
+        console.info(`[MCP] Office diagnostics available at ${tildify(officeMcpEndpoint.socketPath)}`);
       } catch (error) {
         await officeAddinHost?.close();
         officeAddinHost = null;
         // These are local startup/transport errors, never document content or
         // renderer exceptions. Keep their reason so startup is diagnosable.
-        console.warn("[MCP] Office diagnostics could not start:", { message: error.message, code: error.code });
+        console.warn("[MCP] Office diagnostics could not start:", { message: tildify(error.message), code: error.code });
       }
     }
     if (teamsControlService && config.multiAccount?.enabled) {
