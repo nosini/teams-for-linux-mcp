@@ -2,7 +2,7 @@ const { z } = require("zod");
 
 const { LIMIT, BASE, itemFields, pickItem, segment, id, filename, eTag, base64 } = require("./channelFileTypes");
 class FileRequestError extends Error {
-  constructor(message, status) { super(message); this.status = status; }
+  constructor(message, status, code) { super(message); this.status = status; this.code = code; }
 }
 
 // Neither Graph tokens nor preauthenticated download URLs cross the MCP boundary.
@@ -62,7 +62,7 @@ class ChannelFiles {
       let size = 0;
       for await (const chunk of response.body || []) {
         size += chunk.length;
-        if (size > (responseOptions.maxBytes ?? 2 * LIMIT)) throw new FileRequestError("Response exceeds the transfer limit.");
+        if (size > (responseOptions.maxBytes ?? 2 * LIMIT)) throw new FileRequestError("Response exceeds the transfer limit.", undefined, "RESPONSE_TOO_LARGE");
         chunks.push(chunk);
       }
       const body = Buffer.concat(chunks);

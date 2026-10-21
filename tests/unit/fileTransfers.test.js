@@ -55,9 +55,23 @@ describe("chunked channel file transfers", () => {
     const chunk = await transfers.readChunk({ transferId, offset: 0 });
     assert.equal(chunk.done, true);
     assert.equal(calls[2].headers.Authorization, "Bearer secret-token");
+    assert.equal(calls[2].headers.Range, "bytes=0-6");
     assert.equal(calls[3].headers.Authorization, undefined);
     assert.equal(calls[3].headers.Range, "bytes=0-6");
     assert.doesNotMatch(JSON.stringify(chunk), /secret/);
+  });
+
+  it("reads ranges served directly by /content and rejects a full body for a later chunk", async () => {
+    const bytes = Buffer.alloc(CHUNK_SIZE * 2, 7);
+    const large = { ...item, size: bytes.length };
+    const range = (offset, end) => new Response(bytes.subarray(offset, end), { status: 206, headers: { "content-range": `bytes ${offset}-${end - 1}/${bytes.length}` } });
+    const { transfers, calls } = setup([large, large, range(0, CHUNK_SIZE), large, large, new Response(bytes, { status: 200 })]);
+    const { transferId } = await transfers.beginDownload({ driveId: "d", itemId: "file" });
+    const first = await transfers.readChunk({ transferId, offset: 0 });
+    assert.equal(Buffer.from(first.contentBase64, "base64").length, CHUNK_SIZE);
+    assert.equal(calls[2].headers.Range, `bytes=0-${CHUNK_SIZE - 1}`);
+    await assert.rejects(transfers.readChunk({ transferId, offset: CHUNK_SIZE }), { message: "Microsoft did not return the exact requested byte range." });
+    assert.equal(calls[5].headers.Range, `bytes=${CHUNK_SIZE}-${CHUNK_SIZE * 2 - 1}`);
   });
 
   it("rejects ignored, incorrect and oversized range responses", async () => {

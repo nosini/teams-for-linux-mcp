@@ -116,13 +116,20 @@ class FileTransfers {
         let response;
         const options = { headers: { Range: `bytes=${offset}-${end - 1}` } };
         const bounds = { details: true, maxBytes: length };
-        if (before["@microsoft.graph.downloadUrl"]) {
-          response = await this.files.request(transferUrl(before["@microsoft.graph.downloadUrl"]), options, false, bounds);
-        } else {
-          // Some tenants omit the download annotation even when selected.
-          // Resolve /content's redirect and apply Range to that private URL.
-          response = await this.files.request(`${this.files.itemPath(transfer.driveId, transfer.itemId)}/content`, {}, true, bounds);
-          if (response.redirect) response = await this.files.request(transferUrl(response.redirect), options, false, bounds);
+        try {
+          if (before["@microsoft.graph.downloadUrl"]) {
+            response = await this.files.request(transferUrl(before["@microsoft.graph.downloadUrl"]), options, false, bounds);
+          } else {
+            // Some tenants omit the download annotation even when selected.
+            // /content either serves the range itself or redirects to a
+            // private URL, where Range is applied again.
+            response = await this.files.request(`${this.files.itemPath(transfer.driveId, transfer.itemId)}/content`, options, true, bounds);
+            if (response.redirect) response = await this.files.request(transferUrl(response.redirect), options, false, bounds);
+          }
+        } catch (error) {
+          // A server that ignores Range sends more than the requested chunk.
+          if (error.code !== "RESPONSE_TOO_LARGE") throw error;
+          response = {};
         }
         if (!response.body || response.body.length !== length || !((response.status === 206 && response.headers.get("content-range") === `bytes ${offset}-${end - 1}/${transfer.size}`) || (response.status === 200 && offset === 0 && end === transfer.size))) throw new Error("Microsoft did not return the exact requested byte range.");
         bytes = response.body;
