@@ -30,20 +30,20 @@ const defaults = require("./defaults");
 module.exports = {
       mcp: {
         default: { enabled: false, addin: { enabled: false, port: 39847 } },
-        describe: "Local MCP access to Office diagnostics and an optional Excel add-in bridge. Requires restart.",
+        describe: "Local MCP access to Office diagnostics and an optional Excel/Word add-in bridge. Requires restart.",
         type: "object",
         fields: {
           enabled: {
             type: "boolean",
-            describe: "Expose Office diagnostics over a private Unix socket for local agents. Enable addin.enabled separately for live Excel tools.",
+            describe: "Expose Office diagnostics over a private Unix socket for local agents. Enable addin.enabled separately for live Excel and Word tools.",
           },
           "addin.enabled": {
             type: "boolean",
-            describe: "Serve the Excel task pane over loopback HTTPS and enable live workbook tools. Requires OpenSSL for local certificate creation and uploading the generated add-in manifest in Excel.",
+            describe: "Serve the Office task pane over loopback HTTPS and enable live Excel/Word tools. Requires OpenSSL for local certificate creation and uploading the generated add-in manifest in the corresponding Office application.",
           },
           "addin.port": {
             type: "number",
-            describe: "Loopback HTTPS port for the Excel add-in (1024–65535). Changing it requires uploading the regenerated manifest again.",
+            describe: "Loopback HTTPS port for the Office add-ins (1024–65535). Changing it requires uploading the regenerated manifests again.",
           },
         },
         applyMode: "restart",

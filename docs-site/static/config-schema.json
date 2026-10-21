@@ -13,26 +13,26 @@
           "port": 39847
         }
       },
-      "description": "Local MCP access to Office diagnostics and an optional Excel add-in bridge. Requires restart.",
+      "description": "Local MCP access to Office diagnostics and an optional Excel/Word add-in bridge. Requires restart.",
       "applyMode": "restart",
       "fields": [
         {
           "path": "enabled",
           "type": "boolean",
           "default": false,
-          "description": "Expose Office diagnostics over a private Unix socket for local agents. Enable addin.enabled separately for live Excel tools."
+          "description": "Expose Office diagnostics over a private Unix socket for local agents. Enable addin.enabled separately for live Excel and Word tools."
         },
         {
           "path": "addin.enabled",
           "type": "boolean",
           "default": false,
-          "description": "Serve the Excel task pane over loopback HTTPS and enable live workbook tools. Requires OpenSSL for local certificate creation and uploading the generated add-in manifest in Excel."
+          "description": "Serve the Office task pane over loopback HTTPS and enable live Excel/Word tools. Requires OpenSSL for local certificate creation and uploading the generated add-in manifest in the corresponding Office application."
         },
         {
           "path": "addin.port",
           "type": "number",
           "default": 39847,
-          "description": "Loopback HTTPS port for the Excel add-in (1024–65535). Changing it requires uploading the regenerated manifest again."
+          "description": "Loopback HTTPS port for the Office add-ins (1024–65535). Changing it requires uploading the regenerated manifests again."
         }
       ]
     },

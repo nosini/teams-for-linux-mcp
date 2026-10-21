@@ -43,6 +43,14 @@ describe("Office add-in HTTPS host", () => {
     assert.equal(manifest.Hosts[0].Host[0].$.Name, "Workbook");
     assert.equal(manifest.DefaultSettings[0].SourceLocation[0].$.DefaultValue, `${host.origin}/taskpane.html`);
     assert.equal(manifest.Permissions[0], "ReadWriteDocument");
+    assert.equal((await request("/wordOperations.js")).status, 200);
+    const wordManifest = (await parseStringPromise(await fs.readFile(host.wordManifestPath, "utf8"))).OfficeApp;
+    assert.equal(wordManifest.Hosts[0].Host[0].$.Name, "Document");
+    assert.equal(wordManifest.Requirements[0].Sets[0].$.DefaultMinVersion, "1.6");
+    assert.equal(wordManifest.Requirements[0].Sets[0].Set[0].$.Name, "WordApi");
+    assert.notEqual(wordManifest.Id[0], manifest.Id[0]);
+    assert.equal(wordManifest.DefaultSettings[0].SourceLocation[0].$.DefaultValue, `${host.origin}/taskpane.html`);
+    assert.equal(wordManifest.Permissions[0], "ReadWriteDocument");
   });
 
   it("pins the exact certificate, address, port, error and validity without broad trust", async (t) => {

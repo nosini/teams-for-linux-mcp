@@ -14,6 +14,13 @@
     TIMEOUT: "The operation deadline expired. Read the cells before retrying a write; its outcome may be unknown.",
     TOO_LARGE: "The result is too large. Read a smaller range.",
     OFFICE_ERROR: "Excel could not complete the operation. Read the affected cells before retrying a write.",
+    WORD_ERROR: "Word could not complete the operation. Read the affected paragraph before retrying a write.",
+    WRONG_APPLICATION: "This tool does not match the connected document's application.",
+    INVALID_PAGE: "Use a start from 0 to 100,000 and a count from 1 to 50.",
+    INVALID_TEXT: "Use literal single-paragraph text: findText must contain 1–255 characters without caret codes, and replacementText at most 8,192 characters.",
+    WRONG_PARAGRAPH: "The paragraph is no longer available. Read paragraphs again.",
+    STALE_PARAGRAPH: "The read token expired, was used, or the paragraph text changed. Read the paragraph again before writing.",
+    AMBIGUOUS_TEXT: "The text must match exactly once in the paragraph. Read the paragraph and choose unique text.",
   };
   function fail(code) { const error = new Error(messages[code]); error.code = code; throw error; }
   function rangeShape(address) {
@@ -47,9 +54,8 @@
     }
   }
 
-  class ExcelSession {
-    constructor(excel, { documentId, getDocumentUrl, randomUUID = () => crypto.randomUUID(), now = Date.now }) {
-      this.excel = excel;
+  class OfficeSession {
+    constructor({ documentId, getDocumentUrl, randomUUID = () => crypto.randomUUID(), now = Date.now }) {
       this.documentId = documentId;
       this.getDocumentUrl = getDocumentUrl;
       this.initialUrl = getDocumentUrl();
@@ -67,6 +73,18 @@
       if (!Number.isFinite(request.deadline) || this.now() >= request.deadline) fail("TIMEOUT");
     }
 
+    remember(result) {
+      const saved = JSON.parse(JSON.stringify({ ...result, expires: this.now() + 120000 }));
+      while (this.snapshots.size >= 64) this.snapshots.delete(this.snapshots.keys().next().value);
+      const readToken = this.randomUUID();
+      this.snapshots.set(readToken, saved);
+      return { ...result, readToken };
+    }
+  }
+
+  class ExcelSession extends OfficeSession {
+    constructor(excel, options) { super(options); this.excel = excel; }
+
     snapshot(range, args) {
       const result = {
         worksheetId: args.worksheetId, address: args.address.toUpperCase(),
@@ -74,11 +92,7 @@
       };
       if (!bounded(result)) fail("TOO_LARGE");
       // Detach from Office's proxy objects and the result returned to callers.
-      const saved = JSON.parse(JSON.stringify({ ...result, expires: this.now() + 120000 }));
-      while (this.snapshots.size >= 64) this.snapshots.delete(this.snapshots.keys().next().value);
-      const readToken = this.randomUUID();
-      this.snapshots.set(readToken, saved);
-      return { ...result, readToken };
+      return this.remember(result);
     }
 
     async execute(request) {
@@ -140,5 +154,5 @@
       }
     }
   }
-  return { ExcelSession, rangeShape, validateData, messages };
+  return { OfficeSession, ExcelSession, rangeShape, validateData, bounded, fail, messages };
 });

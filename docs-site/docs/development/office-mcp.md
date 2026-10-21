@@ -3,9 +3,10 @@
 The Office MCP bridge connects local agents to documents inside the running
 Teams client. Diagnostics discover Word and Excel frames. The optional Excel
 task pane provides live worksheet reads, value writes and formula writes through
-Office.js. Word document operations are not implemented yet.
+Office.js. The Word task pane reads paragraphs and replaces exact text inside a
+chosen paragraph using the same local bridge.
 
-## Connect a workbook
+## Connect an Excel workbook
 
 From the repository, start the source client with both MCP and the add-in enabled:
 
@@ -99,6 +100,59 @@ npm run mcp:call -- excel_write_range '{"documentId":"DOCUMENT_ID","worksheetId"
 
 `mcp:call` also accepts a socket path after the JSON arguments. These commands
 use the same MCP tools an agent uses; the write command changes the document.
+
+## Connect a Word document
+
+Start Teams with the same `--mcp.enabled --mcp.addin.enabled` flags and open a
+Word document using **Edit in Teams**. Upload the separate Word manifest printed
+at startup: `…/mcp/word-addin.xml` (normally
+`~/.config/Electron/mcp/word-addin.xml` when running from source). The existing
+Excel manifest still targets Excel. Each application has its own manifest and
+uses the same HTTPS task pane and local MCP socket.
+
+Word requires WordApi 1.6 for its session-local paragraph IDs. The pane checks
+this requirement before connecting and explains when the host is unsupported.
+Keep the pane open and call `office_list_documents`; the entry must report
+`application: "word"`. Reconnect your agent after restarting Teams to discover
+the additional tools.
+
+| Tool | Purpose |
+| --- | --- |
+| `word_read_paragraphs` | Read a page of main-body paragraphs, their IDs and read tokens |
+| `word_read_paragraph` | Refresh one paragraph by its ID |
+| `word_replace_text` | Replace one exact text match within an unchanged paragraph |
+
+```sh
+npm run mcp:call -- word_read_paragraphs '{"documentId":"DOCUMENT_ID","start":0,"count":10}'
+npm run mcp:call -- word_read_paragraph '{"documentId":"DOCUMENT_ID","paragraphId":"PARAGRAPH_ID"}'
+npm run mcp:call -- word_replace_text '{"documentId":"DOCUMENT_ID","paragraphId":"PARAGRAPH_ID","readToken":"READ_TOKEN","findText":"Hello","replacementText":"Greetings"}'
+```
+
+Discovery pages contain up to 50 paragraphs (20 by default), bounded to 32 KB,
+and return `nextStart` or `null` at the end. Paragraph insertion can shift page
+offsets during coauthoring. Writes always target a paragraph ID, which remains
+valid only within that add-in session. Headers, footers, text boxes and other
+document stories are outside the discovery scope. Large paragraphs may exceed
+the result limit even when read individually.
+
+Each paragraph read returns a two-minute, single-use token. Replacement checks
+the paragraph's text again after searching and rejects changes or multiple
+matches. Searches are literal and case-sensitive, limited to 255 characters;
+caret codes and control characters are rejected. Replacement is plain text,
+limited to 8,192 characters with no paragraph breaks; an empty string deletes
+the matched text. Only the matched range is replaced, leaving surrounding
+content intact. Formatting within the replacement follows Word's behavior;
+this tool does not provide rich-text editing or paragraph creation. The token
+compares text, not formatting. Word's own save and coauthoring workflow remains
+responsible for the document.
+
+As with Excel, the comparison and write are not atomic against other editors.
+Read back after an uncertain write; do not retry the previous request. Test
+against a disposable document before using these tools on real work.
+
+The API choices follow Microsoft's reference for
+[paragraph IDs and search](https://learn.microsoft.com/en-us/javascript/api/word/word.paragraph?view=word-js-preview)
+and [paged collection loads](https://learn.microsoft.com/en-us/javascript/api/office/officeextension.loadoption?view=word-js-preview).
 
 ## Run from source
 
@@ -197,16 +251,16 @@ decision for future editing tools.
 `app/mcp/localEndpoint.js` binds SDK transports to local connections, and
 `app/mcp/stdio.js` forwards an agent's stdio connection to the app.
 `app/office/inspector.js` owns frame discovery and capability inspection.
-`app/office/liveBridge.js` finds our own task-pane frames under Excel ancestors
+`app/office/liveBridge.js` finds our own task-pane frames under Excel/Word ancestors
 and sends structured commands through Electron's frame API. The Office.js
-operations run in `app/office/addin/operations.js`. The app does not inject
+operations run in `app/office/addin/operations.js` and `wordOperations.js`. The app does not inject
 Office.js into Microsoft's editor or expose arbitrary JavaScript execution as
 an MCP tool. Local-file servers are not used to overwrite coauthored documents.
 
 Run the focused checks with:
 
 ```sh
-node --test tests/unit/excelSession.test.js tests/unit/officeAddinHost.test.js tests/unit/officeLiveBridge.test.js tests/unit/officeInspector.test.js tests/unit/officeMcp.test.js
+node --test tests/unit/excelSession.test.js tests/unit/wordSession.test.js tests/unit/officeAddinHost.test.js tests/unit/officeLiveBridge.test.js tests/unit/officeInspector.test.js tests/unit/officeMcp.test.js
 npm run lint
 ```
 
@@ -216,6 +270,6 @@ test machine can use `xvfb-run -a` before that command. This test serves local
 fixture responses for every HTTPS request and does not contact Microsoft or
 verify a real signed-in Office editor. Also run
 `./node_modules/.bin/electron tests/electron/officeAddinSmoke.js` to check the real
-loopback certificate pin and the task-pane read/write workflow with a simulated
-Office.js host. This remains separate from testing the add-in against Microsoft
-Excel and another coauthor.
+loopback certificate pin and Excel/Word task-pane reads and writes with simulated
+Office.js hosts. It also checks that older Word hosts remain disconnected. This
+remains separate from testing against Microsoft Office and another coauthor.

@@ -1,10 +1,11 @@
 const { McpServer } = require("@modelcontextprotocol/server");
 const { z } = require("zod");
 const { rangeShape, validateData } = require("../office/addin/operations");
+const { validateText, paragraphIdPattern } = require("../office/addin/wordOperations");
 
 function createOfficeMcpServer(inspector, liveBridge = null) {
   const server = new McpServer({ name: "teams-for-linux-office", version: "0.1.0" }, {
-    instructions: liveBridge ? "List connected documents first. Excel writes require a read token from a recent read of the same worksheet and range. Do not automatically retry a timed-out write. API presence diagnostics alone do not indicate a live bridge." : "This server discovers Office frames in Teams. It cannot yet read or edit document content. API presence is diagnostic only.",
+    instructions: liveBridge ? "List connected documents first and choose tools matching the application. Excel writes require a read token from the same worksheet and range. Word replacements require a read token from the same paragraph and exactly one matching text occurrence. Do not automatically retry a timed-out write. API presence diagnostics alone do not indicate a live bridge." : "This server discovers Office frames in Teams. It cannot yet read or edit document content. API presence is diagnostic only.",
   });
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
   const result = (value) => ({ content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value });
@@ -38,9 +39,24 @@ function createOfficeMcpServer(inspector, liveBridge = null) {
       }
     };
     server.registerTool("office_list_documents", {
-      description: "List Excel documents connected through the installed Teams Office Bridge task pane. Open the add-in in each workbook to connect it. Returns temporary document IDs; call this before document operations.",
+      description: "List Excel and Word documents connected through the installed Teams Office Bridge task pane. Open the corresponding add-in in each document to connect it. Returns temporary document IDs and application names; call this before document operations.",
       inputSchema: z.object({}).strict(), annotations,
     }, () => respond(() => liveBridge.listDocuments()));
+    const paragraphId = z.string().regex(paragraphIdPattern);
+    server.registerTool("word_read_paragraphs", {
+      description: "Read a page of main-body Word paragraphs with session-local paragraph IDs, text and single-use two-minute read tokens. start is a zero-based discovery offset; use paragraph IDs for edits. Pages can shift during coauthoring. Returns nextStart, or null at the end. Headers, footers and text boxes are outside this scope. Requires WordApi 1.6.",
+      inputSchema: z.object({ documentId, start: z.number().int().min(0).max(100000).default(0), count: z.number().int().min(1).max(50).default(20) }).strict(), annotations,
+    }, ({ documentId: id, ...args }) => respond(() => liveBridge.execute(id, "read_paragraphs", args)));
+    server.registerTool("word_read_paragraph", {
+      description: "Read one Word paragraph by its session-local ID and obtain a fresh single-use read token. Use this to refresh a paragraph after edits or an uncertain write.",
+      inputSchema: z.object({ documentId, paragraphId }).strict(), annotations,
+    }, ({ documentId: id, ...args }) => respond(() => liveBridge.execute(id, "read_paragraph", args)));
+    server.registerTool("word_replace_text", {
+      description: "Replace exactly one case-sensitive literal text match inside an explicitly selected Word paragraph. Requires a recent read token for unchanged paragraph text. findText is 1–255 characters without caret codes; replacementText is at most 8,192 characters, with an empty string deleting the match. Control characters and paragraph breaks are rejected. Edits only the matched range; replacement formatting follows Word. Coauthor comparison and replacement are not atomic. Read again after uncertain writes.",
+      inputSchema: z.object({ documentId, paragraphId, readToken: z.string().uuid(), findText: z.string().min(1).max(255), replacementText: z.string().max(8192) }).strict()
+        .refine((args) => { try { validateText(args.findText, args.replacementText); return true; } catch { return false; } }, "Use bounded literal text without caret search codes or paragraph/control characters."),
+      annotations: { ...annotations, readOnlyHint: false, destructiveHint: true, idempotentHint: false },
+    }, ({ documentId: id, ...args }) => respond(() => liveBridge.execute(id, "replace_text", args)));
     server.registerTool("excel_list_worksheets", {
       description: "List worksheet IDs and names in an explicitly selected connected Excel document.",
       inputSchema: z.object({ documentId }).strict(), annotations,

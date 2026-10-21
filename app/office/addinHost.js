@@ -38,17 +38,19 @@ async function credentials(directory) {
   }
 }
 
-function createManifest(origin) {
+function createManifest(origin, application = "excel") {
+  if (!["excel", "word"].includes(application)) throw new Error("Unsupported add-in application");
+  const word = application === "word";
   return `<?xml version="1.0" encoding="UTF-8"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="TaskPaneApp">
-  <Id>2b7fbc27-ea2d-4db4-94df-2b770f6cda41</Id>
+  <Id>${word ? "a3ace64b-e94a-4b65-91af-3a2c6d6d88a5" : "2b7fbc27-ea2d-4db4-94df-2b770f6cda41"}</Id>
   <Version>0.1.0.0</Version>
   <ProviderName>Teams for Linux</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Teams Office Bridge"/>
-  <Description DefaultValue="Connect this workbook to local agents through the Teams client."/>
-  <Hosts><Host Name="Workbook"/></Hosts>
-  <Requirements><Sets DefaultMinVersion="1.1"><Set Name="ExcelApi"/></Sets></Requirements>
+  <Description DefaultValue="Connect this document to local agents through the Teams client."/>
+  <Hosts><Host Name="${word ? "Document" : "Workbook"}"/></Hosts>
+  <Requirements><Sets DefaultMinVersion="${word ? "1.6" : "1.1"}"><Set Name="${word ? "WordApi" : "ExcelApi"}"/></Sets></Requirements>
   <DefaultSettings><SourceLocation DefaultValue="${origin}/taskpane.html"/></DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
 </OfficeApp>
@@ -59,7 +61,7 @@ async function startAddinHost({ directory, port = 39847 }) {
   if (!Number.isInteger(port) || (port !== 0 && (port < 1024 || port > 65535))) throw new Error("Invalid add-in port");
   const { cert, key, certificate } = await credentials(path.join(directory, "addin"));
   const assets = new Map();
-  for (const [name, type] of [["taskpane.html", "text/html"], ["taskpane.js", "text/javascript"], ["operations.js", "text/javascript"], ["taskpane.css", "text/css"]]) {
+  for (const [name, type] of [["taskpane.html", "text/html"], ["taskpane.js", "text/javascript"], ["operations.js", "text/javascript"], ["wordOperations.js", "text/javascript"], ["taskpane.css", "text/css"]]) {
     assets.set(`/${name}`, { content: await fs.readFile(path.join(__dirname, "addin", name)), type });
   }
   let origin;
@@ -88,6 +90,7 @@ async function startAddinHost({ directory, port = 39847 }) {
   });
   origin = `https://127.0.0.1:${server.address().port}`;
   const manifestPath = path.join(directory, "excel-addin.xml");
+  const wordManifestPath = path.join(directory, "word-addin.xml");
   let closing;
   const close = () => {
     if (!closing) {
@@ -98,10 +101,11 @@ async function startAddinHost({ directory, port = 39847 }) {
   };
   try {
     await fs.writeFile(manifestPath, createManifest(origin), { mode: 0o600 });
+    await fs.writeFile(wordManifestPath, createManifest(origin, "word"), { mode: 0o600 });
   } catch (error) { await close(); throw error; }
   server.on("error", () => {});
   return {
-    origin, manifestPath, close,
+    origin, manifestPath, wordManifestPath, close,
     acceptsCertificate(url, error, peer) {
       try {
         const candidate = new X509Certificate(peer.data);

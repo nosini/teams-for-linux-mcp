@@ -822,6 +822,7 @@ async function handleAppReady() {
           });
           liveBridge = new LiveOfficeBridge(() => webContents.getAllWebContents(), officeAddinHost.origin);
           console.info(`[MCP] Upload this Excel add-in manifest: ${officeAddinHost.manifestPath}`);
+          console.info(`[MCP] Upload this Word add-in manifest: ${officeAddinHost.wordManifestPath}`);
         }
         officeMcpEndpoint = await startLocalEndpoint({
           directory: path.join(app.getPath("userData"), "mcp"),

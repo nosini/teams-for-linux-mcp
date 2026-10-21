@@ -10,7 +10,7 @@ For configuration examples, file locations, and platform-specific notes, see the
 
 | Option | Type | Default | Description | Apply |
 |--------|------|---------|-------------|-------|
-| `mcp` | `object` | `{"enabled":false,"addin":{"enabled":false,"port":39847}}` | Local MCP access to Office diagnostics and an optional Excel add-in bridge. Requires restart. | `restart` |
+| `mcp` | `object` | `{"enabled":false,"addin":{"enabled":false,"port":39847}}` | Local MCP access to Office diagnostics and an optional Excel/Word add-in bridge. Requires restart. | `restart` |
 | `dbusControl` | `object` | `{"enabled":false,"busName":""}` | Opt-in Linux user session D-Bus control and observed Teams state. Requires restart. | `restart` |
 | `appActiveCheckInterval` | `number` | `2` | A numeric value in seconds as poll interval to check if the system is active from being idle | `restart` |
 | `screenSharing` | `object` | `{"thumbnail":{"enabled":true,"alwaysOnTop":true},"lockInhibitionMethod":"Electron"}` | Screen sharing configuration. thumbnail: controls the preview window shown during active sharing. lockInhibitionMethod: screen lock inhibition method (Electron/WakeLockSentinel). | `restart` |
@@ -105,9 +105,9 @@ Object options group several related settings. The tables below list each nested
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `mcp.enabled` | `boolean` | `false` | Expose Office diagnostics over a private Unix socket for local agents. Enable addin.enabled separately for live Excel tools. |
-| `mcp.addin.enabled` | `boolean` | `false` | Serve the Excel task pane over loopback HTTPS and enable live workbook tools. Requires OpenSSL for local certificate creation and uploading the generated add-in manifest in Excel. |
-| `mcp.addin.port` | `number` | `39847` | Loopback HTTPS port for the Excel add-in (1024–65535). Changing it requires uploading the regenerated manifest again. |
+| `mcp.enabled` | `boolean` | `false` | Expose Office diagnostics over a private Unix socket for local agents. Enable addin.enabled separately for live Excel and Word tools. |
+| `mcp.addin.enabled` | `boolean` | `false` | Serve the Office task pane over loopback HTTPS and enable live Excel/Word tools. Requires OpenSSL for local certificate creation and uploading the generated add-in manifest in the corresponding Office application. |
+| `mcp.addin.port` | `number` | `39847` | Loopback HTTPS port for the Office add-ins (1024–65535). Changing it requires uploading the regenerated manifests again. |
 
 ### dbusControl
 
