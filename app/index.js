@@ -20,8 +20,8 @@ const { registerGraphApiHandlers } = require("./graphApi/ipcHandlers");
 const { allowedChannels } = require("./security/ipcValidator");
 const { installIpcSecurity } = require("./security/ipcSecurity");
 const { installWebviewGuard } = require("./security/webviewGuard");
+const { OfficeMcp } = require("./mcp");
 const { sanitize: sanitizePii } = require("./utils/logSanitizer");
-const { tildify } = require("./utils/homePath");
 const { isPreLoginAuthNoise, parseChunkLoadFailure, formatChunkLoadWarning } = require("./utils/rendererErrors");
 const { register: registerGlobalShortcuts, sendKeyboardEventToWindow } = require("./globalShortcuts");
 const CommandLineManager = require("./startup/commandLine");
@@ -184,8 +184,7 @@ const profilesManager = new ProfilesManager(appConfig.settingsStore);
 // after `mainAppWindow.onAppReady` resolves.
 let profileViewManager = null;
 let dbusControlService = null;
-let officeMcpEndpoint = null;
-let officeAddinHost = null;
+let officeMcp = null;
 
 // ADR-020 Phase 2 unread aggregation; null with the flag off, where the
 // tray/badge handlers keep their single-sender behaviour.
@@ -246,10 +245,7 @@ if (gotTheLock) {
     console.debug("will-quit");
     teamsStateService?.dispose();
     teamsControlService?.dispose();
-    if (officeMcpEndpoint) {
-      void officeMcpEndpoint.close().catch(() => {});
-    }
-    if (officeAddinHost) void officeAddinHost.close().catch(() => {});
+    void officeMcp?.close();
     try {
       dbusControlService?.stop();
     } catch (error) {
@@ -807,58 +803,15 @@ async function handleAppReady() {
 
     initializeGraphApiClient();
     registerGraphApiHandlers(ipcMain, graphApiClient);
-    if (config.mcp?.enabled === true && process.platform === "linux") {
-      try {
-        const { OfficeInspector } = require("./office/inspector");
-        const { SurfaceInspector } = require("./editor/inspector");
-        const { createOfficeMcpServer } = require("./mcp/server");
-        const { startLocalEndpoint } = require("./mcp/localEndpoint");
-        const inspector = new OfficeInspector(() => webContents.getAllWebContents());
-        const surfaceInspector = new SurfaceInspector(() => webContents.getAllWebContents());
-        let liveBridge = null;
-        if (config.mcp.addin?.enabled === true) {
-          // Without the add-in host only the live Office tools are missing;
-          // diagnostics, channel files and CodeMirror tools still start.
-          try {
-            const { startAddinHost } = require("./office/addinHost");
-            const { LiveOfficeBridge } = require("./office/liveBridge");
-            officeAddinHost = await startAddinHost({
-              directory: path.join(app.getPath("userData"), "mcp"),
-              port: config.mcp.addin.port,
-            });
-            liveBridge = new LiveOfficeBridge(() => webContents.getAllWebContents(), officeAddinHost.origin);
-            console.info(`[MCP] Upload this Excel add-in manifest: ${tildify(officeAddinHost.manifestPath)}`);
-            console.info(`[MCP] Upload this Word add-in manifest: ${tildify(officeAddinHost.wordManifestPath)}`);
-          } catch (error) {
-            await officeAddinHost?.close();
-            officeAddinHost = null;
-            console.warn("[MCP] Office add-in host could not start:", { message: tildify(error.message), code: error.code });
-          }
-        }
-        let channelFiles = null;
-        if (config.mcp.files?.enabled === true) {
-          const { ChannelFiles } = require("./mcp/channelFiles");
-          const fileGraph = new GraphApiClient({ graphApi: { enabled: true } });
-          fileGraph.initialize(mainAppWindow.getWindow());
-          channelFiles = new ChannelFiles(fileGraph);
-        }
-        let codeMirrorBridge = null;
-        if (config.mcp.codemirror?.enabled === true) {
-          const { CodeMirrorBridge } = require("./editor/codeMirrorBridge");
-          codeMirrorBridge = new CodeMirrorBridge(surfaceInspector);
-        }
-        officeMcpEndpoint = await startLocalEndpoint({
-          directory: path.join(app.getPath("userData"), "mcp"),
-          createServer: () => createOfficeMcpServer(inspector, liveBridge, channelFiles, surfaceInspector, codeMirrorBridge),
-        });
-        console.info(`[MCP] Office diagnostics available at ${tildify(officeMcpEndpoint.socketPath)}`);
-      } catch (error) {
-        await officeAddinHost?.close();
-        officeAddinHost = null;
-        // These are local startup/transport errors, never document content or
-        // renderer exceptions. Keep their reason so startup is diagnosable.
-        console.warn("[MCP] Office diagnostics could not start:", { message: tildify(error.message), code: error.code });
-      }
+    if (OfficeMcp.isEnabled(config)) {
+      officeMcp = new OfficeMcp({
+        config,
+        userDataPath: app.getPath("userData"),
+        getWebContents: () => webContents.getAllWebContents(),
+        getMainWindow: () => mainAppWindow.getWindow(),
+        graphApiClient,
+      });
+      await officeMcp.start();
     }
     if (teamsControlService && config.multiAccount?.enabled) {
       profilesManager.on("switch", () => setImmediate(() => teamsControlService.refreshState()));
@@ -881,9 +834,9 @@ async function handleAppReady() {
 }
 
 function handleCertificateError(event, webContents, url, error, certificate, callback) {
-  // Only this app instance's own loopback service and exact leaf certificate.
-  // Other certificates continue through the existing corporate-CA handling.
-  if (officeAddinHost?.acceptsCertificate(url, error, certificate)) {
+  // The MCP add-in host's own loopback certificate. Other certificates
+  // continue through the existing corporate-CA handling.
+  if (officeMcp?.acceptsCertificate(url, error, certificate)) {
     event.preventDefault();
     callback(true);
     return;
