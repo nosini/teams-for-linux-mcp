@@ -271,8 +271,29 @@ class FileTransfers {
         transfer.item = pickItem(response.data);
         this.finishState(transfer, "completed");
         return this.describe(transfer);
-      } catch (error) { transfer.status = "uncertain"; transfer.uncertainOperation = "commit"; throw error; }
+      } catch (error) { throw this.commitFailure(transfer, error); }
     });
+  }
+  commitFailure(transfer, error) {
+    const status = error.status;
+    // An HTTP client error is Microsoft's definite answer that it did not
+    // commit. Network failures, timeouts and server errors leave it unknown.
+    if (status === 412) {
+      this.finishState(transfer, "stale");
+      return new Error(`${error.message} The file changed before the commit; Microsoft did not save this upload. Cancel and start again from a fresh read.`, { cause: error });
+    }
+    if (status === 404 || status === 410) {
+      this.finishState(transfer, "unknown");
+      return new Error(`${error.message} The session is gone. Inspect the destination; it may have completed or expired. Do not blindly upload again.`, { cause: error });
+    }
+    if (status === 423 || status === 429) return new Error(`${error.message} Microsoft did not save this upload yet. Wait before finishing again.`, { cause: error });
+    if (Number.isInteger(status) && status >= 400 && status < 500 && status !== 408) {
+      this.finishState(transfer, "rejected");
+      return new Error(`${error.message} Microsoft rejected the commit and did not save this upload. Cancel this transfer.`, { cause: error });
+    }
+    transfer.status = "uncertain";
+    transfer.uncertainOperation = "commit";
+    return error;
   }
   async cancelTransfer({ transferId }) {
     return this.withTransfer(transferId, async (transfer) => {
@@ -302,7 +323,7 @@ function registerTransferTools(server, transfers) {
   register("teams_begin_upload", "Start a resumable upload with a fixed positive total byte size. Create: parentId+name, conflict behavior fail. Replace: itemId+expectedETag from a recent read. Optional expectedSha256 checks assembled source bytes before explicit finish. Requests deferred commit; on a definite HTTP 400 retries session creation without deferred commit. Returns commitMode: deferred requires teams_finish_upload; automatic publishes on the final chunk. eTag checks are not an atomic lock across the upload. Existing Office files should be edited live for coauthoring. Empty files use the single-call tools.", upload, (args) => transfers.beginUpload(args), true);
   register("teams_upload_chunk", "Send one sequential base64 chunk at nextOffset, at most 640 KiB; nonfinal chunks must be multiples of 320 KiB. Total size is fixed. Identical repeat of the last acknowledged chunk returns its receipt without resending. After an error call teams_get_transfer; do not blindly retry. Check commitMode: automatic publishes on the final chunk; deferred normally stages the file for teams_finish_upload. Unexpected provider auto-completion is reported as completed.", z.object({ transferId: token, offset: integer, contentBase64: base64(CHUNK_SIZE).refine((value) => value.length > 0) }).strict(), (args) => transfers.uploadChunk(args), true);
   register("teams_get_transfer", "Inspect transfer progress. Uploads query Microsoft and reconcile uncertain chunk outcomes before resuming. A vanished session or uncertain commit does not prove whether a file was saved; inspect the destination before any new write. Transfer IDs survive MCP reconnects while Teams remains running.", z.object({ transferId: token }).strict(), (args) => transfers.getTransfer(args));
-  register("teams_finish_upload", "Explicitly publish a staged upload after all chunks and optional source SHA-256 validation. Replacement checks the original eTag again immediately before committing; no atomic coauthor lock is claimed. Never automatically retry an uncertain commit. Microsoft may rewrite Office package metadata, so saved bytes/size can differ from source. Returns projected saved item metadata when confirmed.", z.object({ transferId: token }).strict(), (args) => transfers.finishUpload(args), true);
+  register("teams_finish_upload", "Explicitly publish a staged upload after all chunks and optional source SHA-256 validation. Replacement checks the original eTag again immediately before committing; no atomic coauthor lock is claimed. Never automatically retry an uncertain commit (network failure, timeout or server error). A definite rejection saves nothing: stale after a changed eTag, rejected otherwise; locked or throttled uploads stay ready to finish later. Microsoft may rewrite Office package metadata, so saved bytes/size can differ from source. Returns projected saved item metadata when confirmed.", z.object({ transferId: token }).strict(), (args) => transfers.finishUpload(args), true);
   register("teams_cancel_transfer", "Cancel a local download or ask Microsoft to delete an unfinished upload session. This does not delete or undo an already saved file, including one whose commit outcome was uncertain. Temporary provider storage otherwise expires automatically.", z.object({ transferId: token }).strict(), (args) => transfers.cancelTransfer(args), true);
 }
 module.exports = { FileTransfers, registerTransferTools, CHUNK_SIZE };

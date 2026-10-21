@@ -231,6 +231,36 @@ describe("chunked channel file transfers", () => {
     assert.equal(calls.filter((call) => call.method === "POST").length, 2); // Create + one commit.
   });
 
+  it("distinguishes definite commit rejections from uncertain commits", async () => {
+    const cases = [[412, "stale", /changed before the commit/], [409, "rejected", /rejected the commit/], [403, "rejected", /rejected the commit/], [410, "unknown", /may have completed/], [500, "uncertain", /HTTP 500/], [408, "uncertain", /HTTP 408/]];
+    for (const [code, status, message] of cases) {
+      const { transfers, calls } = setup([session(), progress(7), new Response("secret response", { status: code }), new Response(null, { status: 204 })]);
+      const { transferId } = await start(transfers, 7);
+      await send(transfers, transferId, 0, Buffer.alloc(7));
+      await assert.rejects(transfers.finishUpload({ transferId }), (error) => message.test(error.message) && !error.message.includes("secret"));
+      if (status === "uncertain") {
+        assert.equal(transfers.entries.get(transferId).uncertainOperation, "commit");
+        continue;
+      }
+      const inspected = await transfers.getTransfer({ transferId });
+      assert.equal(inspected.status, status, String(code));
+      assert.equal(inspected.uncertainOperation, undefined);
+      const cancelled = await transfers.cancelTransfer({ transferId });
+      assert.equal(cancelled.status, "cancelled");
+      assert.equal(calls.at(-1).method, "DELETE");
+      assert.equal("instruction" in cancelled, status === "unknown", String(code));
+    }
+    for (const code of [423, 429]) {
+      const { transfers, calls } = setup([session(), progress(7), new Response(null, { status: code }), progress(7), item]);
+      const { transferId } = await start(transfers, 7);
+      await send(transfers, transferId, 0, Buffer.alloc(7));
+      await assert.rejects(transfers.finishUpload({ transferId }), /did not save this upload yet/);
+      assert.equal((await transfers.getTransfer({ transferId })).status, "ready");
+      assert.equal((await transfers.finishUpload({ transferId })).status, "completed");
+      assert.equal(calls.filter((call) => call.method === "POST").length, 3); // Create + two commits.
+    }
+  });
+
   it("reports provider auto-completion, sanitizes conflicts and cancels staged uploads", async () => {
     const auto = setup([session(), item]);
     const transfer = await start(auto.transfers, 7);

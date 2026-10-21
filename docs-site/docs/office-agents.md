@@ -297,9 +297,14 @@ Use the live editing tools for collaboration in open documents.
 After a chunk request fails, call `teams_get_transfer` before continuing. It
 queries Microsoft's progress and reconciles whether that chunk was accepted.
 An identical repeat of the last acknowledged chunk returns its receipt without
-sending it again. An uncertain finish is never automatically retried. If a
-session disappears, inspect the destination: disappearance can mean expiration
-or successful publication. Cancelling cannot delete or revert a saved file.
+sending it again. An uncertain finish is never automatically retried. A finish
+is uncertain after a network failure, timeout or server error. When Microsoft
+answers with a definite client error instead, nothing was saved: a failed eTag
+precondition reports `stale`, other rejections such as a name conflict report
+`rejected`, and a locked file or throttling keeps the upload `ready` to finish
+again later. If a session disappears, inspect the destination: disappearance
+can mean expiration or successful publication. Cancelling cannot delete or
+revert a saved file.
 
 Transfer IDs survive agent reconnects while Teams remains running, expire after
 30 idle minutes (or Microsoft's earlier expiry), and are lost on Teams restart.
