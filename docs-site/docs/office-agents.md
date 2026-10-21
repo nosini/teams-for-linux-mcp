@@ -7,8 +7,10 @@ Office's normal saving and coauthoring workflow.
 
 ## Enable the bridge
 
-This feature currently requires the source version with Office bridge support.
-From its repository, install dependencies with `npm ci`, then start Teams:
+The [Teams Office Flatpak](https://github.com/nosini/teams-office-flatpak)
+packages this version with the bridge always enabled; its README lists the
+add-in and socket paths it uses. To run it from source instead, install
+dependencies in this repository with `npm ci`, then start Teams:
 
 ```sh
 npm start -- --mcp.enabled --mcp.addin.enabled
