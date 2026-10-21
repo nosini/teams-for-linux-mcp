@@ -28,6 +28,18 @@
 const defaults = require("./defaults");
 
 module.exports = {
+      mcp: {
+        default: { enabled: false },
+        describe: "Local MCP access to Office editor discovery and read-only capability diagnostics. Requires restart.",
+        type: "object",
+        fields: {
+          enabled: {
+            type: "boolean",
+            describe: "Expose Office diagnostics over a private Unix socket for local agents. Document reading and editing are not available yet.",
+          },
+        },
+        applyMode: "restart",
+      },
       dbusControl: {
         default: { enabled: false, busName: "" },
         describe: "Opt-in Linux user session D-Bus control and observed Teams state. Requires restart.",

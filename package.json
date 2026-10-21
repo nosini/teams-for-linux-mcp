@@ -21,6 +21,7 @@
   "scripts": {
     "postinstall": "electron-builder install-app-deps",
     "lint": "eslint .",
+    "mcp:diagnose": "node scripts/diagnoseOfficeMcp.js",
     "test:unit": "node --test 'tests/unit/*.test.js'",
     "test:e2e": "playwright test",
     "test:authenticated": "playwright test --config playwright.authenticated.config.js",
@@ -53,17 +54,20 @@
   },
   "dependencies": {
     "@homebridge/dbus-native": "0.7.9",
+    "@modelcontextprotocol/server": "2.3.1",
     "cbor-x": "^1.6.6",
     "electron-log": "^5.4.4",
     "electron-store": "11.0.2",
     "electron-updater": "^6.8.9",
     "electron-window-state": "5.0.3",
     "mqtt": "^5.16.1",
-    "yargs": "^18.2.0"
+    "yargs": "^18.2.0",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/client": "2.3.1",
     "@playwright/test": "1.64.1",
     "electron": "44.9.0",
     "electron-builder": "26.15.7",

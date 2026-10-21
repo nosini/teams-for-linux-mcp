@@ -1,8 +1,25 @@
 {
   "$generatedBy": "scripts/generateConfigDocs.js",
   "source": "app/config/options.js",
-  "optionCount": 85,
+  "optionCount": 86,
   "options": [
+    {
+      "name": "mcp",
+      "type": "object",
+      "default": {
+        "enabled": false
+      },
+      "description": "Local MCP access to Office editor discovery and read-only capability diagnostics. Requires restart.",
+      "applyMode": "restart",
+      "fields": [
+        {
+          "path": "enabled",
+          "type": "boolean",
+          "default": false,
+          "description": "Expose Office diagnostics over a private Unix socket for local agents. Document reading and editing are not available yet."
+        }
+      ]
+    },
     {
       "name": "dbusControl",
       "type": "object",

@@ -5,6 +5,7 @@ This directory contains technical documentation for Teams for Linux developers a
 ## Structure
 
 ### Active Development Docs
+- **[office-mcp.md](office-mcp.md)** - Local MCP connection and embedded Office editor diagnostics
 - **[token-cache-architecture.md](token-cache-architecture.md)** - Token cache implementation, secure storage architecture, and authentication persistence
 - **[security-architecture.md](security-architecture.md)** - Security architecture, threat model, and compensating controls
 - **[ADR-002: Token Cache Secure Storage](adr/002-token-cache-secure-storage.md)** - Architecture decision for secure token storage implementation

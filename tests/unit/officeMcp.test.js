@@ -1,0 +1,209 @@
+const { describe, it } = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const net = require("node:net");
+const path = require("node:path");
+const { once } = require("node:events");
+const { spawn, execFile } = require("node:child_process");
+const { promisify } = require("node:util");
+const { createInterface } = require("node:readline");
+const { startLocalEndpoint } = require("../../app/mcp/localEndpoint");
+const { createOfficeMcpServer } = require("../../app/mcp/server");
+const { OfficeInspector } = require("../../app/office/inspector");
+const { findSocket } = require("../../scripts/diagnoseOfficeMcp");
+const execFileAsync = promisify(execFile);
+const diagnosticScript = path.resolve(__dirname, "../../scripts/diagnoseOfficeMcp.js");
+
+async function testDirectory(t) {
+  const root = path.resolve(__dirname, "../../test-results/mcp");
+  await fs.mkdir(root, { recursive: true });
+  const directory = await fs.mkdtemp(path.join(root, "run-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  return directory;
+}
+
+function rpcReader(input, output) {
+  let id = 0;
+  const pending = new Map();
+  const reader = createInterface({ input });
+  reader.on("line", (line) => {
+    const message = JSON.parse(line);
+    if (pending.has(message.id)) {
+      const resolve = pending.get(message.id);
+      pending.delete(message.id);
+      resolve(message);
+    }
+  });
+  return {
+    async request(method, params = {}) {
+      const requestId = ++id;
+      const response = new Promise((resolve) => pending.set(requestId, resolve));
+      output.write(`${JSON.stringify({ jsonrpc: "2.0", id: requestId, method, params })}\n`);
+      return response;
+    },
+    notify(method) { output.write(`${JSON.stringify({ jsonrpc: "2.0", method })}\n`); },
+    close() { reader.close(); },
+  };
+}
+
+async function initialize(client) {
+  const response = await client.request("initialize", {
+    protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test-agent", version: "1" },
+  });
+  assert.equal(response.result.serverInfo.name, "teams-for-linux-office");
+  client.notify("notifications/initialized");
+}
+
+describe("Office MCP endpoint", { timeout: 10000 }, () => {
+  it("collects editor diagnostics with the SDK client and distinguishes an empty editor list", async (t) => {
+    const directory = await testDirectory(t);
+    let contents = [];
+    const inspector = new OfficeInspector(() => contents);
+    const endpoint = await startLocalEndpoint({ directory, createServer: () => createOfficeMcpServer(inspector) });
+    t.after(() => endpoint.close());
+    const options = { timeout: 5000 };
+    const empty = await execFileAsync(process.execPath, [diagnosticScript, endpoint.socketPath], options);
+    assert.deepEqual(JSON.parse(empty.stdout), { connected: true, editors: [], truncated: false });
+    assert.match(empty.stderr, /Connected to Teams, but no recognized Office editor/);
+    contents = [{
+      id: 1, isDestroyed: () => false,
+      mainFrame: { framesInSubtree: [{
+        processId: 2, routingId: 3, url: "https://excel.cloud.microsoft/?secret=token",
+        executeJavaScript: async () => ({ officeGlobal: true }),
+      }] },
+    }];
+    const populated = await execFileAsync(process.execPath, [diagnosticScript, endpoint.socketPath], options);
+    const result = JSON.parse(populated.stdout);
+    assert.equal(result.connected, true);
+    assert.equal(result.editors.length, 1);
+    assert.equal(result.editors[0].apiPresence.officeGlobal, true);
+    assert.equal(result.editors[0].bridgeStatus, "not-connected");
+    assert.doesNotMatch(populated.stdout, /secret|token/);
+    assert.match(populated.stderr, /MCP socket:/);
+    assert.doesNotMatch(populated.stderr, /Could not collect/);
+  });
+
+  it("discovers the source-run socket, supports the packaged location, and rejects ambiguity", async (t) => {
+    const directory = await testDirectory(t);
+    const createServer = () => createOfficeMcpServer(new OfficeInspector(() => []));
+    await assert.rejects(findSocket(directory), { code: "ENOENT" });
+    const source = await startLocalEndpoint({ directory: path.join(directory, "Electron", "mcp"), createServer });
+    t.after(() => source.close());
+    assert.equal(await findSocket(directory), source.socketPath);
+    const result = await execFileAsync(process.execPath, [diagnosticScript], {
+      timeout: 5000, env: { ...process.env, XDG_CONFIG_HOME: directory },
+    });
+    assert.equal(JSON.parse(result.stdout).connected, true);
+    assert.ok(result.stderr.includes(source.socketPath));
+    const packaged = await startLocalEndpoint({ directory: path.join(directory, "teams-for-linux", "mcp"), createServer });
+    t.after(() => packaged.close());
+    await assert.rejects(findSocket(directory), { code: "AMBIGUOUS_SOCKET" });
+    await source.close();
+    assert.equal(await findSocket(directory), packaged.socketPath);
+  });
+
+  it("serves a real stdio agent through the socket, validates tools and cleans up", async (t) => {
+    const directory = await testDirectory(t);
+    const inspector = new OfficeInspector(() => [{
+      id: 1, isDestroyed: () => false,
+      mainFrame: { framesInSubtree: [{
+        processId: 2, routingId: 3, url: "https://excel.cloud.microsoft/?secret=token",
+        executeJavaScript: async () => ({ officeGlobal: true }),
+      }] },
+    }]);
+    const endpoint = await startLocalEndpoint({ directory, createServer: () => createOfficeMcpServer(inspector) });
+    const child = spawn(process.execPath, [path.resolve(__dirname, "../../app/mcp/stdio.js"), endpoint.socketPath]);
+    const exited = once(child, "exit");
+    const errors = [];
+    child.stderr.on("data", (chunk) => errors.push(chunk.toString()));
+    const client = rpcReader(child.stdout, child.stdin);
+    t.after(async () => { client.close(); child.kill(); await endpoint.close(); });
+
+    assert.equal((await fs.stat(directory)).mode & 0o777, 0o700);
+    assert.equal((await fs.stat(endpoint.socketPath)).mode & 0o777, 0o600);
+    await initialize(client);
+    const listing = await client.request("tools/list");
+    assert.deepEqual(listing.result.tools.map((tool) => tool.name).sort(), ["office_inspect_editor", "office_list_editors"]);
+    assert.ok(listing.result.tools.every((tool) => tool.annotations.readOnlyHint));
+    const editors = await client.request("tools/call", { name: "office_list_editors", arguments: {} });
+    assert.equal(editors.result.structuredContent.editors[0].id, "1:2:3");
+    assert.doesNotMatch(JSON.stringify(editors), /secret|token/);
+    const inspected = await client.request("tools/call", { name: "office_inspect_editor", arguments: { editorId: "1:2:3" } });
+    assert.equal(inspected.result.structuredContent.apiPresence.officeGlobal, true);
+    assert.equal(inspected.result.structuredContent.bridgeStatus, "not-connected");
+    const missing = await client.request("tools/call", { name: "office_inspect_editor", arguments: { editorId: "9:9:9" } });
+    assert.equal(missing.result.isError, true);
+    const invalid = await client.request("tools/call", { name: "office_inspect_editor", arguments: { editorId: "javascript:alert(1)" } });
+    assert.ok(invalid.error || invalid.result?.isError);
+    child.stdin.end();
+    assert.deepEqual(await exited, [0, null]);
+    assert.deepEqual(errors, []);
+  });
+
+  it("refuses permissive directories, symlinks and non-socket files", async (t) => {
+    const directory = await testDirectory(t);
+    const createServer = () => createOfficeMcpServer(new OfficeInspector(() => []));
+    await fs.chmod(directory, 0o755);
+    await assert.rejects(startLocalEndpoint({ directory, createServer }), /private directory/);
+    await fs.chmod(directory, 0o700);
+    const link = path.join(directory, "link");
+    await fs.symlink(directory, link);
+    await assert.rejects(startLocalEndpoint({ directory: link, createServer }), /private directory/);
+    const socketPath = path.join(directory, "bridge.sock");
+    await fs.writeFile(socketPath, "keep me");
+    await assert.rejects(startLocalEndpoint({ directory, createServer }), /not a socket/);
+    assert.equal(await fs.readFile(socketPath, "utf8"), "keep me");
+  });
+
+  it("does not unlink a running endpoint and closes idle clients on shutdown", async (t) => {
+    const directory = await testDirectory(t);
+    const createServer = () => createOfficeMcpServer(new OfficeInspector(() => []));
+    const endpoint = await startLocalEndpoint({ directory, createServer });
+    t.after(() => endpoint.close());
+    const original = await fs.stat(endpoint.socketPath);
+    await assert.rejects(startLocalEndpoint({ directory, createServer }), /already running/);
+    assert.equal((await fs.stat(endpoint.socketPath)).ino, original.ino);
+    const socket = net.createConnection(endpoint.socketPath);
+    await once(socket, "connect");
+    const client = rpcReader(socket, socket);
+    t.after(() => { client.close(); socket.destroy(); });
+    await initialize(client);
+    assert.deepEqual((await client.request("tools/call", { name: "office_list_editors" })).result.structuredContent.editors, []);
+    const closed = once(socket, "close");
+    await endpoint.close();
+    await closed;
+    await assert.rejects(fs.stat(endpoint.socketPath), { code: "ENOENT" });
+  });
+
+  it("recovers the socket left by an abruptly terminated process", async (t) => {
+    const directory = await testDirectory(t);
+    const socketPath = path.join(directory, "bridge.sock");
+    const child = spawn(process.execPath, ["-e", "require('node:net').createServer().listen(process.argv[1], () => process.stdout.write('ready\\n'))", socketPath]);
+    t.after(() => child.kill());
+    await once(child.stdout, "data");
+    const exited = once(child, "exit");
+    child.kill("SIGKILL");
+    await exited;
+    assert.ok((await fs.stat(socketPath)).isSocket());
+    await assert.rejects(
+      execFileAsync(process.execPath, [diagnosticScript, socketPath], { timeout: 5000 }),
+      (error) => error.code === 1 && /socket exists, but no Teams MCP server is listening/.test(error.stderr),
+    );
+    const endpoint = await startLocalEndpoint({ directory, createServer: () => createOfficeMcpServer(new OfficeInspector(() => [])) });
+    await endpoint.close();
+    await assert.rejects(fs.stat(socketPath), { code: "ENOENT" });
+  });
+
+  it("fails the stdio adapter clearly when Teams is not running", async (t) => {
+    const directory = await testDirectory(t);
+    const child = spawn(process.execPath, [path.resolve(__dirname, "../../app/mcp/stdio.js"), path.join(directory, "missing.sock")]);
+    const errors = [];
+    child.stderr.on("data", (chunk) => errors.push(chunk.toString()));
+    assert.deepEqual(await once(child, "exit"), [1, null]);
+    assert.match(errors.join(""), /Cannot connect to Teams MCP/);
+    await assert.rejects(
+      execFileAsync(process.execPath, [diagnosticScript, path.join(directory, "missing.sock")], { timeout: 5000 }),
+      (error) => error.code === 1 && /No MCP socket was found/.test(error.stderr),
+    );
+  });
+});

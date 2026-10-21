@@ -6,6 +6,7 @@ const {
   systemPreferences,
   nativeImage,
   session,
+  webContents,
 } = require("electron");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -182,6 +183,7 @@ const profilesManager = new ProfilesManager(appConfig.settingsStore);
 // after `mainAppWindow.onAppReady` resolves.
 let profileViewManager = null;
 let dbusControlService = null;
+let officeMcpEndpoint = null;
 
 // ADR-020 Phase 2 unread aggregation; null with the flag off, where the
 // tray/badge handlers keep their single-sender behaviour.
@@ -242,6 +244,9 @@ if (gotTheLock) {
     console.debug("will-quit");
     teamsStateService?.dispose();
     teamsControlService?.dispose();
+    if (officeMcpEndpoint) {
+      void officeMcpEndpoint.close().catch(() => {});
+    }
     try {
       dbusControlService?.stop();
     } catch (error) {
@@ -799,6 +804,23 @@ async function handleAppReady() {
 
     initializeGraphApiClient();
     registerGraphApiHandlers(ipcMain, graphApiClient);
+    if (config.mcp?.enabled === true && process.platform === "linux") {
+      try {
+        const { OfficeInspector } = require("./office/inspector");
+        const { createOfficeMcpServer } = require("./mcp/server");
+        const { startLocalEndpoint } = require("./mcp/localEndpoint");
+        const inspector = new OfficeInspector(() => webContents.getAllWebContents());
+        officeMcpEndpoint = await startLocalEndpoint({
+          directory: path.join(app.getPath("userData"), "mcp"),
+          createServer: () => createOfficeMcpServer(inspector),
+        });
+        console.info(`[MCP] Office diagnostics available at ${officeMcpEndpoint.socketPath}`);
+      } catch (error) {
+        // These are local startup/transport errors, never document content or
+        // renderer exceptions. Keep their reason so startup is diagnosable.
+        console.warn("[MCP] Office diagnostics could not start:", { message: error.message, code: error.code });
+      }
+    }
     if (teamsControlService && config.multiAccount?.enabled) {
       profilesManager.on("switch", () => setImmediate(() => teamsControlService.refreshState()));
     }
