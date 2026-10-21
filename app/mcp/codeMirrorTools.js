@@ -1,17 +1,8 @@
 const { z } = require("zod");
+const { registerJsonTool } = require("./tools");
 function registerCodeMirrorTools(server, bridge) {
-  const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-  function register(name, description, shape, operation, writing = false) {
-    server.registerTool(name, {
-      description, inputSchema: z.object(shape).strict(),
-      annotations: writing ? { ...annotations, readOnlyHint: false, destructiveHint: true, idempotentHint: false } : annotations,
-    }, async (args) => {
-      try {
-        const value = await operation(args);
-        return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
-      } catch (error) { return { isError: true, content: [{ type: "text", text: error.message }] }; }
-    });
-  }
+  const register = (name, description, shape, operation, writing = false) =>
+    registerJsonTool(server, name, { description, inputSchema: z.object(shape).strict(), writing, openWorld: false }, operation);
   register("codemirror_list_editors", "Discover live CodeMirror 6 editors in SharePoint frames, including the native Markdown editor. Uses version-specific DOM links; unsupported instances count as unavailable. IDs bind to an editor instance, not a file name. Identify the intended editor with the user before editing. Requires mcp.codemirror.enabled. Native saving and coauthor compatibility are not yet verified.", {}, () => bridge.listEditors());
   const editorId = z.string().uuid();
   register("codemirror_read_text", "Read a window of the live editor model, including unsaved text, without using the DOM's visible text. start/count are UTF-16 code units, count at most 8,192 (default 4,096). Newlines are LF. Returns a two-minute single-use token bound to this editor instance and the entire document revision; use nextStart for another window.", { editorId, start: z.number().int().min(0).default(0), count: z.number().int().min(1).max(8192).default(4096) }, (args) => bridge.execute("read", args));

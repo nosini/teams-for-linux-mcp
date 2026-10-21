@@ -1,4 +1,5 @@
 const { z } = require("zod");
+const { registerJsonTool } = require("./tools");
 
 const { LIMIT, BASE, itemFields, pickItem, segment, id, filename, eTag, base64 } = require("./channelFileTypes");
 class FileRequestError extends Error {
@@ -133,17 +134,8 @@ class ChannelFiles {
 }
 
 function registerChannelFileTools(server, files) {
-  const read = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
-  function register(name, description, shape, operation, write = false) {
-    server.registerTool(name, { description, inputSchema: z.object(shape).strict(), annotations: write ? { ...read, readOnlyHint: false, destructiveHint: true, idempotentHint: false } : read }, async (args) => {
-      try {
-        const value = await operation(args);
-        return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
-      } catch (error) {
-        return { isError: true, content: [{ type: "text", text: error.message }] };
-      }
-    });
-  }
+  const register = (name, description, shape, operation, writing = false) =>
+    registerJsonTool(server, name, { description, inputSchema: z.object(shape).strict(), writing, openWorld: true }, operation);
   const cursor = z.string().max(8192).optional();
   register("teams_list_teams", "List teams joined by the signed-in Teams user. A 403 may mean this session lacks team discovery permission. Pass nextCursor as cursor to continue.", { cursor }, ({ cursor }) => files.list("/me/joinedTeams", cursor));
   register("teams_list_channels", "List channels of a selected team. Pass nextCursor as cursor to continue.", { teamId: id, cursor }, ({ teamId, cursor }) => files.list(`/teams/${segment(teamId)}/channels?$select=id,displayName,membershipType`, cursor));

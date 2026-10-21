@@ -1,4 +1,5 @@
 const { z } = require("zod");
+const { registerJsonTool } = require("./tools");
 const { rangeShape, editing } = require("../office/addin/operations");
 const { paragraphIdPattern } = require("../office/addin/wordOperations");
 
@@ -15,16 +16,11 @@ function registerEditingTools(server, bridge) {
   const excelFormat = z.object({ font: font.optional(), numberFormat: z.string().min(1).max(256).optional(), fillColor: color.optional(), horizontalAlignment: z.enum(editing.excelAlignments).optional(), verticalAlignment: z.enum(["Top", "Center", "Bottom", "Justify", "Distributed"]).optional(), wrapText: z.boolean().optional() }).strict();
   function register(application, operation, description, shape, writing = false) {
     const warning = writing ? " Requires a recent single-use read token. Comparison and writing are not atomic against coauthors. Do not automatically retry an uncertain write; inspect the result first." : "";
-    server.registerTool(`${application}_${operation}`, {
+    registerJsonTool(server, `${application}_${operation}`, {
       description: description + warning,
       inputSchema: z.object(shape).strict().refine((args) => editing.validate(application, operation, args), "Invalid edit arguments, text or formatting."),
-      annotations: { readOnlyHint: !writing, destructiveHint: writing, idempotentHint: !writing, openWorldHint: false },
-    }, async ({ documentId: id, ...args }) => {
-      try {
-        const value = await bridge.execute(id, operation, args);
-        return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value };
-      } catch (error) { return { isError: true, content: [{ type: "text", text: error.message }] }; }
-    });
+      writing, openWorld: false,
+    }, ({ documentId: id, ...args }) => bridge.execute(id, operation, args));
   }
   register("excel", "inspect_worksheet", "Inspect used-range bounds, name, and a page of structured tables without reading the entire sheet. Empty sheets return usedRange: null. Returns a token for row/column insertion that checks used-range bounds only, not all cell contents or table structure. ExcelApi 1.4.", { documentId, worksheetId, ...page });
   register("excel", "search_range", "Find literal text or formula substrings in an A1 window of up to 1,000 cells. Returns up to 50 matches with cell addresses. Continue with nextOffset using the same window/query. Use inspect_worksheet to plan windows across a large sheet; search does not read beyond the supplied window.", { ...range, query: z.string().min(1).max(256), searchIn: z.enum(["text", "formulas"]).default("text"), matchCase: z.boolean().default(false), offset: z.number().int().min(0).max(1000).default(0) });

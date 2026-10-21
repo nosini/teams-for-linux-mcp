@@ -17,6 +17,10 @@ through a private Unix socket. Linux only, disabled by default. See the
 - `channelFiles.js`, `channelFileTypes.js`, `fileTransfers.js`: Teams channel
   files over Microsoft Graph, including chunked transfers. They use the app's
   `GraphApiClient` when `graphApi.enabled` is set, and their own otherwise.
+- `tools.js`: `registerJsonTool`, the shared tool result, error and annotation
+  wrapper. Every tool states whether it reaches Microsoft services.
+- `evaluateInFrame.js`: runs the fixed bridge and probe scripts in a renderer
+  frame with a timeout.
 - `stdio.js`: the relay an agent runs to connect its stdio to the socket.
 
 The add-in host and live bridge live in `app/office/`, the CodeMirror bridge in

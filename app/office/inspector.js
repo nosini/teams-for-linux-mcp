@@ -1,5 +1,7 @@
 // Discovery only: never load Office.js into the editor, access document content,
 // or call private editor APIs. An Office global alone is not an editing bridge.
+const { evaluateInFrame } = require("../mcp/evaluateInFrame");
+
 function classifyOfficeUrl(value) {
   let url;
   try {
@@ -92,14 +94,8 @@ class OfficeInspector {
     // Resolve afresh on every request; never retain a frame across navigation.
     const entry = this.collect().entries.find(({ metadata }) => metadata.id === id);
     if (!entry) throw new Error("Editor is no longer available. Call office_list_editors again.");
-    let timer;
     try {
-      const capabilities = await Promise.race([
-        entry.frame.executeJavaScript(PROBE_SOURCE, false),
-        new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error("Probe timed out")), this.timeoutMs);
-        }),
-      ]);
+      const capabilities = await evaluateInFrame(entry.frame, PROBE_SOURCE, this.timeoutMs, "Probe timed out");
       // Recheck after execution, since navigation can happen during a probe.
       if (classifyOfficeUrl(entry.frame.url)?.origin !== entry.metadata.origin) {
         throw new Error("Frame navigated");
@@ -115,8 +111,6 @@ class OfficeInspector {
     } catch {
       // Renderer exceptions can contain URLs or document data. Do not forward them.
       return { ...entry.metadata, probeStatus: "unavailable", bridgeStatus: "not-connected" };
-    } finally {
-      clearTimeout(timer);
     }
   }
 }

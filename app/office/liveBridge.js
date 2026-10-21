@@ -1,6 +1,7 @@
 const { classifyOfficeUrl } = require("./inspector");
 const { editing } = require("./addin/operations");
 const { messages } = require("./addin/operations");
+const { evaluateInFrame } = require("../mcp/evaluateInFrame");
 
 class LiveOfficeBridge {
   constructor(getWebContents, origin, { timeoutMs = 15000, probeTimeoutMs = 2000 } = {}) {
@@ -26,14 +27,8 @@ class LiveOfficeBridge {
 
   isAddin(frame) { return !!this.applicationOf(frame); }
 
-  async evaluate(frame, source, timeoutMs = this.timeoutMs) {
-    let timer;
-    try {
-      return await Promise.race([
-        frame.executeJavaScript(source, false),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(messages.TIMEOUT)), timeoutMs); }),
-      ]);
-    } finally { clearTimeout(timer); }
+  evaluate(frame, source, timeoutMs = this.timeoutMs) {
+    return evaluateInFrame(frame, source, timeoutMs, messages.TIMEOUT);
   }
 
   async listDocuments() {

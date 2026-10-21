@@ -1,5 +1,7 @@
 // Fixed, read-only probes for identifying non-Office editors. Never return
 // document text, model data, storage, tokens, full URLs or executable commands.
+const { evaluateInFrame } = require("../mcp/evaluateInFrame");
+
 function frameMetadata(value) {
   try {
     const url = new URL(value);
@@ -128,12 +130,8 @@ class SurfaceInspector {
   async inspectFrame(id) {
     const entry = this.collect().entries.find(({ metadata }) => metadata.id === id);
     if (!entry || !entry.metadata.inspectable) throw new Error("Select an inspectable frame from editor_list_frames.");
-    let timer;
     try {
-      const value = await Promise.race([
-        entry.frame.executeJavaScript(PROBE_SOURCE, false),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("Probe timeout")), this.timeoutMs); }),
-      ]);
+      const value = await evaluateInFrame(entry.frame, PROBE_SOURCE, this.timeoutMs, "Probe timeout");
       if (entry.frame.detached || entry.frame.url !== entry.url) throw new Error("Frame navigated");
       const booleans = (data, keys) => Object.fromEntries(keys.map((key) => [key, data?.[key] === true]));
       return {
@@ -145,7 +143,7 @@ class SurfaceInspector {
       };
     } catch {
       return { ...entry.metadata, probeStatus: "unavailable" };
-    } finally { clearTimeout(timer); }
+    }
   }
 }
 module.exports = { SurfaceInspector, frameMetadata, PROBE_SOURCE };

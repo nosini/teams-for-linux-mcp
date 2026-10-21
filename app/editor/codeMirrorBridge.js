@@ -1,5 +1,6 @@
 const { randomUUID } = require("node:crypto");
 const { codeMirrorCommand } = require("./codeMirrorCommand");
+const { evaluateInFrame } = require("../mcp/evaluateInFrame");
 
 const messages = {
   TIMEOUT: "The editor command timed out. Read the current text before deciding whether to write again.",
@@ -35,13 +36,9 @@ class CodeMirrorBridge {
     const exclusive = operation !== "list";
     if (exclusive && this.busy.has(frame)) throw new Error(messages.BUSY);
     if (exclusive) this.busy.add(frame);
-    let timer;
     try {
       const request = { registryKey: this.registryKey, operation, args, deadline: this.now() + this.timeoutMs - Math.min(500, this.timeoutMs / 5) };
-      const value = await Promise.race([
-        frame.executeJavaScript(`(${codeMirrorCommand.toString()})(${JSON.stringify(request)})`, false),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(messages.TIMEOUT)), this.timeoutMs); }),
-      ]);
+      const value = await evaluateInFrame(frame, `(${codeMirrorCommand.toString()})(${JSON.stringify(request)})`, this.timeoutMs, messages.TIMEOUT);
       if (!allowedFrame(frame) || frame.url !== url) throw new Error(messages.UNAVAILABLE);
       if (!value?.ok) throw new Error(messages[value?.code] || messages.INTERNAL);
       if (!value.data || Buffer.byteLength(JSON.stringify(value.data)) > 32768) throw new Error(messages.INTERNAL);
@@ -52,7 +49,6 @@ class CodeMirrorBridge {
       // eslint-disable-next-line preserve-caught-error
       throw new Error(messages.INTERNAL);
     } finally {
-      clearTimeout(timer);
       if (exclusive) this.busy.delete(frame);
     }
   }

@@ -1,5 +1,6 @@
 const { randomUUID, createHash } = require("node:crypto");
 const { z } = require("zod");
+const { registerJsonTool } = require("./tools");
 const { itemFields, pickItem, id, filename, eTag, base64 } = require("./channelFileTypes");
 const CHUNK_SIZE = 640 * 1024; // Multiple of Graph's 320 KiB fragment quantum.
 const IDLE_MS = 30 * 60 * 1000;
@@ -318,12 +319,8 @@ class FileTransfers {
 
 function registerTransferTools(server, transfers) {
   const token = z.string().uuid(), integer = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
-  function register(name, description, schema, action, writing = false) {
-    server.registerTool(name, { description, inputSchema: schema, annotations: { readOnlyHint: !writing, destructiveHint: writing, idempotentHint: !writing, openWorldHint: true } }, async (args) => {
-      try { const value = await action(args); return { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value }; }
-      catch (error) { return { isError: true, content: [{ type: "text", text: error.message }] }; }
-    });
-  }
+  const register = (name, description, inputSchema, action, writing = false) =>
+    registerJsonTool(server, name, { description, inputSchema, writing, openWorld: true }, action);
   register("teams_begin_download", "Start a version-bound chunked file download of any supported provider size. Returns a private transfer ID and 640 KiB chunk size. Does not return temporary download URLs. Sessions expire after 30 idle minutes and are lost on Teams restart.", z.object({ driveId: id, itemId: id }).strict(), (args) => transfers.beginDownload(args));
   register("teams_read_file_chunk", "Read the next 640 KiB byte range as base64 using transferId and nextOffset. The most recent chunk can be reread safely. Checks original eTag/size before and after every range; discard all assembled bytes if the file changes. Returns chunkSha256 and done. This does not load the whole file into the server.", z.object({ transferId: token, offset: integer }).strict(), (args) => transfers.readChunk(args));
   const upload = z.object({ driveId: id, size: integer.min(1), parentId: id.optional(), name: filename.optional(), itemId: id.optional(), expectedETag: eTag.optional(), expectedSha256: z.string().regex(/^[a-f\d]{64}$/i).optional() }).strict().refine((args) => args.itemId ? !!args.expectedETag && !args.parentId && !args.name : !!args.parentId && !!args.name && !args.expectedETag, "Choose either itemId + expectedETag for replacement or parentId + name for creation.");
