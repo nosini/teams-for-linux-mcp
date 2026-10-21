@@ -11,6 +11,7 @@ const { startLocalEndpoint } = require("../../app/mcp/localEndpoint");
 const { createOfficeMcpServer } = require("../../app/mcp/server");
 const { OfficeInspector } = require("../../app/office/inspector");
 const { findSocket } = require("../../scripts/diagnoseOfficeMcp");
+const { exportConnection } = require("../../scripts/setupOfficeMcp");
 const execFileAsync = promisify(execFile);
 const diagnosticScript = path.resolve(__dirname, "../../scripts/diagnoseOfficeMcp.js");
 
@@ -55,6 +56,34 @@ async function initialize(client) {
 }
 
 describe("Office MCP endpoint", { timeout: 10000 }, () => {
+  it("exports a standalone working relay without overwriting existing agent configuration", async (t) => {
+    const directory = await testDirectory(t);
+    const endpoint = await startLocalEndpoint({ directory: path.join(directory, "endpoint"), createServer: () => createOfficeMcpServer(new OfficeInspector(() => [])) });
+    t.after(() => endpoint.close());
+    const output = path.join(directory, "export");
+    const result = await exportConnection(endpoint.socketPath, output);
+    assert.equal(result.live, false);
+    const config = JSON.parse(await fs.readFile(result.configPath, "utf8"));
+    assert.deepEqual(config.mcpServers["teams-office"], { command: process.execPath, args: [result.relayPath, endpoint.socketPath] });
+    assert.deepEqual((await fs.readdir(output)).sort(), ["mcp.json", "teams-office-stdio.js"]);
+    const child = spawn(process.execPath, [result.relayPath, endpoint.socketPath], { stdio: ["pipe", "pipe", "pipe"] });
+    t.after(() => child.kill());
+    const client = rpcReader(child.stdout, child.stdin);
+    t.after(() => client.close());
+    await initialize(client);
+    assert.equal((await client.request("tools/list")).result.tools.some((tool) => tool.name === "office_list_editors"), true);
+    await assert.rejects(exportConnection(endpoint.socketPath, output), { code: "EEXIST" });
+    assert.deepEqual(JSON.parse(await fs.readFile(result.configPath, "utf8")), config);
+    // A conflicting config must also roll back the newly copied relay.
+    await fs.unlink(result.relayPath);
+    await assert.rejects(exportConnection(endpoint.socketPath, output), { code: "EEXIST" });
+    await assert.rejects(fs.stat(result.relayPath), { code: "ENOENT" });
+    const publicOutput = path.join(directory, "public");
+    await fs.mkdir(publicOutput, { mode: 0o755 });
+    await assert.rejects(exportConnection(endpoint.socketPath, publicOutput), /private/);
+    await assert.rejects(exportConnection("relative.sock", output), /absolute/);
+  });
+
   it("collects editor diagnostics with the SDK client and distinguishes an empty editor list", async (t) => {
     const directory = await testDirectory(t);
     let contents = [];

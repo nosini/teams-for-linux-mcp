@@ -51,7 +51,8 @@
     "dist:windows": "electron-builder --windows --x64",
     "dist:linux:x64": "electron-builder --x64 -l tar.gz deb rpm AppImage",
     "dist:linux:arm64": "electron-builder --arm64 -l tar.gz deb rpm AppImage",
-    "release": "electron-builder"
+    "release": "electron-builder",
+    "mcp:setup": "node scripts/setupOfficeMcp.js"
   },
   "dependencies": {
     "@homebridge/dbus-native": "0.7.9",

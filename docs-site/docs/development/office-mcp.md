@@ -6,6 +6,9 @@ task pane provides live worksheet reads, value writes and formula writes through
 Office.js. The Word task pane reads paragraphs and replaces exact text inside a
 chosen paragraph using the same local bridge.
 
+For installation, agent configuration and container connections, see
+[Connect an agent to Word and Excel](../office-agents.md).
+
 ## Connect an Excel workbook
 
 From the repository, start the source client with both MCP and the add-in enabled:
@@ -227,7 +230,7 @@ recognized yet.
 
 `probeStatus: "completed"` means the diagnostic ran. It does not mean that the
 document is accessible through Office.js. `bridgeStatus: "not-connected"` is
-expected until the live document adapter is implemented. Office.js normally
+expected for editor frames; live access appears separately in `documents`. Office.js normally
 provides document APIs inside an Office add-in; globals in the surrounding
 editor are not a supported substitute for that add-in context. The probe neither
 loads Office.js nor calls `Office.onReady`, `Excel.run` or `Word.run`.

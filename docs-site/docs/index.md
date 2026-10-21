@@ -66,3 +66,5 @@ If you want to fix a bug or add a feature:
 
 - [GitHub Issues](https://github.com/IsmaelMartinez/teams-for-linux/issues) — bug reports and feature requests
 - [Matrix space](https://matrix.to/#/#teams-for-linux-space:matrix.org) — chat with users and contributors
+
+Read [Connect an agent to Word and Excel](office-agents.md) to set up local agent access to Office documents in Teams.
