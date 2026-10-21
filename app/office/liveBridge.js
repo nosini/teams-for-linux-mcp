@@ -4,19 +4,24 @@ const { messages } = require("./addin/operations");
 const { evaluateInFrame } = require("../mcp/evaluateInFrame");
 
 class LiveOfficeBridge {
+  #getWebContents;
+  #origin;
+  #timeoutMs;
+  #probeTimeoutMs;
+  #documents = new Map();
+  #busy = new Set();
+
   constructor(getWebContents, origin, { timeoutMs = 15000, probeTimeoutMs = 2000 } = {}) {
-    this.getWebContents = getWebContents;
-    this.origin = origin;
-    this.timeoutMs = timeoutMs;
-    this.probeTimeoutMs = probeTimeoutMs;
-    this.documents = new Map();
-    this.busy = new Set();
+    this.#getWebContents = getWebContents;
+    this.#origin = origin;
+    this.#timeoutMs = timeoutMs;
+    this.#probeTimeoutMs = probeTimeoutMs;
   }
 
   applicationOf(frame) {
     try {
       const url = new URL(frame.url);
-      if (url.origin !== this.origin || url.pathname !== "/taskpane.html" || frame.detached) return null;
+      if (url.origin !== this.#origin || url.pathname !== "/taskpane.html" || frame.detached) return null;
       for (let parent = frame.parent, depth = 0; parent && depth < 16; parent = parent.parent, depth++) {
         const application = classifyOfficeUrl(parent.url)?.application;
         if (["excel", "word"].includes(application)) return application;
@@ -27,13 +32,13 @@ class LiveOfficeBridge {
 
   isAddin(frame) { return !!this.applicationOf(frame); }
 
-  evaluate(frame, source, timeoutMs = this.timeoutMs) {
+  evaluate(frame, source, timeoutMs = this.#timeoutMs) {
     return evaluateInFrame(frame, source, timeoutMs, messages.TIMEOUT);
   }
 
   async listDocuments() {
     const candidates = [];
-    for (const contents of this.getWebContents()) {
+    for (const contents of this.#getWebContents()) {
       try {
         if (contents.isDestroyed()) continue;
         for (const frame of contents.mainFrame.framesInSubtree) {
@@ -44,7 +49,7 @@ class LiveOfficeBridge {
     // describe() only reads task-pane state. Probe panes in parallel with a
     // short deadline so a stalled or still-loading pane cannot delay the rest.
     const results = await Promise.allSettled(candidates.map(({ frame }) =>
-      this.evaluate(frame, "globalThis.TeamsOfficeBridge?.describe()", this.probeTimeoutMs)));
+      this.evaluate(frame, "globalThis.TeamsOfficeBridge?.describe()", this.#probeTimeoutMs)));
     const found = new Map();
     for (let index = 0; index < results.length && found.size < 32; index++) {
       const { frame, contents } = candidates[index], info = results[index].value;
@@ -54,20 +59,20 @@ class LiveOfficeBridge {
         }
       } catch { /* Window closed during discovery. */ }
     }
-    this.documents = found;
+    this.#documents = found;
     return { documents: [...found.values()].map(({ frame: _frame, ...metadata }) => metadata) };
   }
 
   async execute(documentId, operation, args) {
-    const entry = this.documents.get(documentId);
+    const entry = this.#documents.get(documentId);
     if (!entry || this.applicationOf(entry.frame) !== entry.application) throw new Error(messages.WRONG_DOCUMENT);
     const operations = entry.application === "word" ? ["read_paragraphs", "read_paragraph", "replace_text", ...editing.wordOperations] :
       ["list_worksheets", "read_range", "write_range", "set_formulas", ...editing.excelOperations];
     if (!operations.includes(operation)) throw new Error(messages.WRONG_APPLICATION);
-    if (this.busy.has(documentId)) throw new Error(messages.BUSY);
-    this.busy.add(documentId);
+    if (this.#busy.has(documentId)) throw new Error(messages.BUSY);
+    this.#busy.add(documentId);
     try {
-      const request = { documentId, operation, args, deadline: Date.now() + this.timeoutMs - 1000 };
+      const request = { documentId, operation, args, deadline: Date.now() + this.#timeoutMs - 1000 };
       // Only a structured command reaches our own, locally served task pane.
       // JSON encoding keeps cell data out of executable JavaScript syntax.
       const source = `globalThis.TeamsOfficeBridge?.execute(${JSON.stringify(request)})`;
@@ -77,7 +82,7 @@ class LiveOfficeBridge {
     } catch (error) {
       if (Object.values(messages).includes(error.message)) throw error;
       throw new Error(messages[entry.application === "word" ? "WORD_ERROR" : "OFFICE_ERROR"], { cause: error });
-    } finally { this.busy.delete(documentId); }
+    } finally { this.#busy.delete(documentId); }
   }
 }
 

@@ -8,12 +8,18 @@ class FileRequestError extends Error {
 
 // Neither Graph tokens nor preauthenticated download URLs cross the MCP boundary.
 class ChannelFiles {
+  #graph;
+  #fetch;
+  #transfers;
+
   constructor(graph, fetcher = globalThis.fetch) {
-    this.graph = graph;
-    this.fetch = fetcher;
+    this.#graph = graph;
+    this.#fetch = fetcher;
     const { FileTransfers } = require("./fileTransfers");
-    this.transfers = new FileTransfers(this);
+    this.#transfers = new FileTransfers(this);
   }
+
+  get transfers() { return this.#transfers; }
 
   async request(endpoint, options = {}, authenticated = true, responseOptions = {}) {
     const url = new URL(endpoint, `${BASE}/`);
@@ -23,14 +29,14 @@ class ChannelFiles {
     if (url.protocol !== "https:" || url.username || url.password) throw new Error("Invalid transfer URL");
     let token;
     if (authenticated) {
-      const result = await this.graph.acquireToken();
+      const result = await this.#graph.acquireToken();
       if (!result.success || !result.token) throw new Error("Sign in to Teams before accessing channel files.");
       token = result.token;
     }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
     try {
-      const response = await this.fetch(url.href, {
+      const response = await this.#fetch(url.href, {
         ...options, redirect: "manual", signal: controller.signal,
         headers: { ...options.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });

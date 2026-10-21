@@ -12,11 +12,11 @@ const { Client } = require("@modelcontextprotocol/client");
 const { StdioClientTransport } = require("@modelcontextprotocol/client/stdio");
 const { codeMirrorFixture } = require("../fixtures/codeMirrorApi");
 
-function fixture(text, link) {
+function fixture(text, link, options = {}) {
   const api = codeMirrorFixture(text, link);
   const frame = { processId: 1, routingId: 2, get url() { return api.model.url; }, executeJavaScript: async (source, gesture) => { assert.equal(gesture, false); return api.evaluate(source); } };
   const inspector = new SurfaceInspector(() => [{ id: 3, isDestroyed: () => false, mainFrame: { framesInSubtree: [frame] } }]);
-  const bridge = new CodeMirrorBridge(inspector, { now: () => api.model.now });
+  const bridge = new CodeMirrorBridge(inspector, { now: () => api.model.now, ...options });
   const list = () => bridge.listEditors();
   const read = async (args = {}) => { const { editors } = await list(); return bridge.execute("read", { editorId: editors[0].id, ...args }); };
   return { ...api, bridge, frame, list, read };
@@ -127,9 +127,8 @@ describe("Native CodeMirror bridge", () => {
     assert.equal(scope.compromised, undefined);
     frame.executeJavaScript = async () => { throw new Error("private contents"); };
     assert.equal((await list()).unavailableFrames.length, 1);
-    const timed = fixture();
+    const timed = fixture(undefined, undefined, { timeoutMs: 15 });
     const target = await timed.read();
-    timed.bridge.timeoutMs = 15;
     timed.frame.executeJavaScript = () => new Promise(() => {});
     await assert.rejects(timed.bridge.execute("read", { editorId: target.editorId }), /timed out/);
   });

@@ -49,16 +49,20 @@ function probeOfficeContext() {
 const PROBE_SOURCE = `(${probeOfficeContext.toString()})()`;
 
 class OfficeInspector {
+  #getWebContents;
+  #timeoutMs;
+  #maxFrames;
+
   constructor(getWebContents, { timeoutMs = 2000, maxFrames = 64 } = {}) {
-    this.getWebContents = getWebContents;
-    this.timeoutMs = timeoutMs;
-    this.maxFrames = maxFrames;
+    this.#getWebContents = getWebContents;
+    this.#timeoutMs = timeoutMs;
+    this.#maxFrames = maxFrames;
   }
 
   collect() {
     const entries = [];
     let truncated = false;
-    for (const contents of this.getWebContents()) {
+    for (const contents of this.#getWebContents()) {
       try {
         if (contents.isDestroyed()) continue;
         for (const frame of contents.mainFrame.framesInSubtree) {
@@ -66,7 +70,7 @@ class OfficeInspector {
           try {
             const metadata = classifyOfficeUrl(frame.url);
             if (!metadata) continue;
-            if (entries.length >= this.maxFrames) {
+            if (entries.length >= this.#maxFrames) {
               truncated = true;
               break;
             }
@@ -95,7 +99,7 @@ class OfficeInspector {
     const entry = this.collect().entries.find(({ metadata }) => metadata.id === id);
     if (!entry) throw new Error("Editor is no longer available. Call office_list_editors again.");
     try {
-      const capabilities = await evaluateInFrame(entry.frame, PROBE_SOURCE, this.timeoutMs, "Probe timed out");
+      const capabilities = await evaluateInFrame(entry.frame, PROBE_SOURCE, this.#timeoutMs, "Probe timed out");
       // Recheck after execution, since navigation can happen during a probe.
       if (classifyOfficeUrl(entry.frame.url)?.origin !== entry.metadata.origin) {
         throw new Error("Frame navigated");

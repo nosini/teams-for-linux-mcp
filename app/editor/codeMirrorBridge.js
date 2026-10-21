@@ -21,24 +21,28 @@ function allowedFrame(frame) {
 }
 
 class CodeMirrorBridge {
+  #inspector;
+  #timeoutMs;
+  #now;
+  #registryKey = `__teamsMcpCodeMirror_${randomUUID()}`;
+  #editors = new Map();
+  #busy = new Set();
+
   constructor(inspector, { timeoutMs = 5000, now = Date.now } = {}) {
-    this.inspector = inspector;
-    this.timeoutMs = timeoutMs;
-    this.now = now;
-    this.registryKey = `__teamsMcpCodeMirror_${randomUUID()}`;
-    this.editors = new Map();
-    this.busy = new Set();
+    this.#inspector = inspector;
+    this.#timeoutMs = timeoutMs;
+    this.#now = now;
   }
   async command(frame, url, operation, args = {}) {
     if (!allowedFrame(frame) || frame.url !== url) throw new Error(messages.UNAVAILABLE);
     // The page command runs synchronously, so discovery cannot interleave with
     // a read or replace. Only those wait for an earlier outcome in this frame.
     const exclusive = operation !== "list";
-    if (exclusive && this.busy.has(frame)) throw new Error(messages.BUSY);
-    if (exclusive) this.busy.add(frame);
+    if (exclusive && this.#busy.has(frame)) throw new Error(messages.BUSY);
+    if (exclusive) this.#busy.add(frame);
     try {
-      const request = { registryKey: this.registryKey, operation, args, deadline: this.now() + this.timeoutMs - Math.min(500, this.timeoutMs / 5) };
-      const value = await evaluateInFrame(frame, `(${codeMirrorCommand.toString()})(${JSON.stringify(request)})`, this.timeoutMs, messages.TIMEOUT);
+      const request = { registryKey: this.#registryKey, operation, args, deadline: this.#now() + this.#timeoutMs - Math.min(500, this.#timeoutMs / 5) };
+      const value = await evaluateInFrame(frame, `(${codeMirrorCommand.toString()})(${JSON.stringify(request)})`, this.#timeoutMs, messages.TIMEOUT);
       if (!allowedFrame(frame) || frame.url !== url) throw new Error(messages.UNAVAILABLE);
       if (!value?.ok) throw new Error(messages[value?.code] || messages.INTERNAL);
       if (!value.data || Buffer.byteLength(JSON.stringify(value.data)) > 32768) throw new Error(messages.INTERNAL);
@@ -49,14 +53,14 @@ class CodeMirrorBridge {
       // eslint-disable-next-line preserve-caught-error
       throw new Error(messages.INTERNAL);
     } finally {
-      if (exclusive) this.busy.delete(frame);
+      if (exclusive) this.#busy.delete(frame);
     }
   }
 
   async listEditors() {
     const found = new Map(), editors = [], unavailableFrames = [];
     let unavailable = 0;
-    const collected = this.inspector.collect();
+    const collected = this.#inspector.collect();
     const frames = collected.entries.filter((entry) => allowedFrame(entry.frame));
     const selected = frames.slice(0, 16);
     let truncated = frames.length > selected.length;
@@ -76,12 +80,12 @@ class CodeMirrorBridge {
         editors.push({ id: candidate.id, frameId: entry.metadata.id, origin: entry.metadata.origin, engine: "codemirror6", length: candidate.length, readOnly: candidate.readOnly === true });
       }
     }
-    this.editors = found;
+    this.#editors = found;
     return { editors, unavailable, unavailableFrames, truncated: truncated || collected.truncated };
   }
 
   async execute(operation, args) {
-    const entry = this.editors.get(args.editorId);
+    const entry = this.#editors.get(args.editorId);
     if (!entry || !["read", "replace"].includes(operation)) throw new Error(messages.UNAVAILABLE);
     return this.command(entry.frame, entry.url, operation, args);
   }

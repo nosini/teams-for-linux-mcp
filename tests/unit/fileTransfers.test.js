@@ -248,12 +248,12 @@ describe("chunked channel file transfers", () => {
   it("distinguishes definite commit rejections from uncertain commits", async () => {
     const cases = [[412, "stale", /changed before the commit/], [409, "rejected", /rejected the commit/], [403, "rejected", /rejected the commit/], [410, "unknown", /may have completed/], [500, "uncertain", /HTTP 500/], [408, "uncertain", /HTTP 408/]];
     for (const [code, status, message] of cases) {
-      const { transfers, calls } = setup([session(), progress(7), new Response("secret response", { status: code }), new Response(null, { status: 204 })]);
+      const { transfers, calls } = setup([session(), progress(7), new Response("secret response", { status: code }), status === "uncertain" ? progress(7) : new Response(null, { status: 204 })]);
       const { transferId } = await start(transfers, 7);
       await send(transfers, transferId, 0, Buffer.alloc(7));
       await assert.rejects(transfers.finishUpload({ transferId }), (error) => message.test(error.message) && !error.message.includes("secret"));
       if (status === "uncertain") {
-        assert.equal(transfers.entries.get(transferId).uncertainOperation, "commit");
+        assert.equal((await transfers.getTransfer({ transferId })).uncertainOperation, "commit");
         continue;
       }
       const inspected = await transfers.getTransfer({ transferId });
@@ -291,9 +291,9 @@ describe("chunked channel file transfers", () => {
     await assert.rejects(send(cancelled.transfers, staging.transferId, 0, Buffer.alloc(7)), /not active/);
   });
 
-  it("bounds active sessions, expires idle transfers and serializes operations", async () => {
+  it("bounds active sessions, expires idle transfers and serializes operations", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
     const { transfers } = setup(Array(10).fill(item));
-    let now = Date.now(); transfers.now = () => now;
     const opened = [];
     for (let i = 0; i < 8; i++) opened.push(await transfers.beginDownload({ driveId: "d", itemId: "file" }));
     await assert.rejects(transfers.beginDownload({ driveId: "d", itemId: "file" }), /Eight/);
@@ -301,10 +301,10 @@ describe("chunked channel file transfers", () => {
     const locked = transfers.withTransfer(opened[0].transferId, () => new Promise((resolve) => { release = resolve; }));
     await assert.rejects(transfers.getTransfer(opened[0]), /Another operation/);
     release(); await locked;
-    now += 30 * 60 * 1000 + 1;
+    t.mock.timers.tick(30 * 60 * 1000 + 1);
     assert.equal((await transfers.getTransfer(opened[0])).status, "expired");
     await transfers.beginDownload({ driveId: "d", itemId: "file" });
-    now += 10 * 60 * 1000;
+    t.mock.timers.tick(10 * 60 * 1000);
     await assert.rejects(transfers.getTransfer(opened[0]), /unknown/);
   });
 

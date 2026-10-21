@@ -19,38 +19,41 @@ function parseJson(bytes) {
 }
 
 class FileTransfers {
+  #files;
+  #now;
+  #entries = new Map();
+  #starts = 0;
+
   constructor(files, { now = Date.now } = {}) {
-    this.files = files;
-    this.now = now;
-    this.entries = new Map();
-    this.starts = 0;
+    this.#files = files;
+    this.#now = now;
   }
   prune() {
-    for (const [key, transfer] of this.entries) {
+    for (const [key, transfer] of this.#entries) {
       if (transfer.busy) continue;
-      if (active(transfer) && transfer.expires <= this.now()) {
+      if (active(transfer) && transfer.expires <= this.#now()) {
         transfer.status = "expired";
         transfer.pending = null;
         transfer.uploadUrl = null;
-        transfer.finished = this.now();
+        transfer.finished = this.#now();
       }
-      if (!active(transfer) && this.now() - (transfer.finished ?? transfer.expires) >= RETAIN_MS) this.entries.delete(key);
+      if (!active(transfer) && this.#now() - (transfer.finished ?? transfer.expires) >= RETAIN_MS) this.#entries.delete(key);
     }
   }
   reserve() {
     this.prune();
-    if (this.starts + [...this.entries.values()].filter(active).length >= 8) throw new Error("Eight transfers are already open. Finish or cancel one first.");
-    this.starts++;
-    while (this.entries.size >= 32) {
-      const old = [...this.entries].find(([, transfer]) => !active(transfer) && !transfer.busy);
+    if (this.#starts + [...this.#entries.values()].filter(active).length >= 8) throw new Error("Eight transfers are already open. Finish or cancel one first.");
+    this.#starts++;
+    while (this.#entries.size >= 32) {
+      const old = [...this.#entries].find(([, transfer]) => !active(transfer) && !transfer.busy);
       if (!old) break;
-      this.entries.delete(old[0]);
+      this.#entries.delete(old[0]);
     }
   }
   remember(transfer) {
     transfer.id = randomUUID();
-    transfer.expires = Math.min(this.now() + IDLE_MS, transfer.serverExpires ?? Infinity);
-    this.entries.set(transfer.id, transfer);
+    transfer.expires = Math.min(this.#now() + IDLE_MS, transfer.serverExpires ?? Infinity);
+    this.#entries.set(transfer.id, transfer);
     return this.describe(transfer);
   }
   describe(transfer) {
@@ -66,7 +69,7 @@ class FileTransfers {
   }
   async withTransfer(transferId, operation) {
     this.prune();
-    const transfer = this.entries.get(transferId);
+    const transfer = this.#entries.get(transferId);
     if (!transfer) throw new Error("Transfer is unknown or no longer retained. Start a new transfer.");
     if (transfer.busy) throw new Error("Another operation is running on this transfer.");
     transfer.busy = true;
@@ -76,19 +79,19 @@ class FileTransfers {
   touch(transfer, response) {
     if (response?.expirationDateTime) {
       const expiry = Date.parse(response.expirationDateTime);
-      if (!Number.isFinite(expiry) || expiry <= this.now()) throw new Error("Microsoft returned an expired transfer session.");
+      if (!Number.isFinite(expiry) || expiry <= this.#now()) throw new Error("Microsoft returned an expired transfer session.");
       transfer.serverExpires = expiry;
     }
-    transfer.expires = Math.min(this.now() + IDLE_MS, transfer.serverExpires ?? Infinity);
+    transfer.expires = Math.min(this.#now() + IDLE_MS, transfer.serverExpires ?? Infinity);
   }
   finishState(transfer, status) {
     transfer.status = status;
-    transfer.finished = this.now();
+    transfer.finished = this.#now();
     transfer.pending = null;
     if (status === "completed" || status === "cancelled") transfer.uploadUrl = null;
   }
   async metadata(driveId, itemId, includeUrl = false) {
-    return this.files.json(`${this.files.itemPath(driveId, itemId)}?$select=${itemFields}${includeUrl ? ",@microsoft.graph.downloadUrl" : ""}`);
+    return this.#files.json(`${this.#files.itemPath(driveId, itemId)}?$select=${itemFields}${includeUrl ? ",@microsoft.graph.downloadUrl" : ""}`);
   }
   async unchanged(transfer, includeUrl = false) {
     const item = await this.metadata(transfer.driveId, transfer.itemId, includeUrl);
@@ -104,7 +107,7 @@ class FileTransfers {
       const item = await this.metadata(driveId, itemId);
       if (!item.file || !item.eTag || !Number.isSafeInteger(item.size) || item.size < 0) throw new Error("Select a file with a valid size and version.");
       return this.remember({ direction: "download", status: "active", driveId, itemId, item: pickItem(item), eTag: item.eTag, size: item.size, offset: 0 });
-    } finally { this.starts--; }
+    } finally { this.#starts--; }
   }
   async readChunk({ transferId, offset }) {
     return this.withTransfer(transferId, async (transfer) => {
@@ -119,13 +122,13 @@ class FileTransfers {
         const bounds = { details: true, maxBytes: length };
         try {
           if (before["@microsoft.graph.downloadUrl"]) {
-            response = await this.files.request(transferUrl(before["@microsoft.graph.downloadUrl"]), options, false, bounds);
+            response = await this.#files.request(transferUrl(before["@microsoft.graph.downloadUrl"]), options, false, bounds);
           } else {
             // Some tenants omit the download annotation even when selected.
             // /content either serves the range itself or redirects to a
             // private URL, where Range is applied again.
-            response = await this.files.request(`${this.files.itemPath(transfer.driveId, transfer.itemId)}/content`, options, true, bounds);
-            if (response.redirect) response = await this.files.request(transferUrl(response.redirect), options, false, bounds);
+            response = await this.#files.request(`${this.#files.itemPath(transfer.driveId, transfer.itemId)}/content`, options, true, bounds);
+            if (response.redirect) response = await this.#files.request(transferUrl(response.redirect), options, false, bounds);
           }
         } catch (error) {
           // A server that ignores Range sends more than the requested chunk.
@@ -152,11 +155,11 @@ class FileTransfers {
       if (itemId) {
         const item = await this.metadata(driveId, itemId);
         if (!item.file || !expectedETag || item.eTag !== expectedETag) throw new Error("File changed. Read it again before replacing it.");
-        path = this.files.itemPath(driveId, itemId);
+        path = this.#files.itemPath(driveId, itemId);
         uploadName = item.name;
       } else {
         filename.parse(name); id.parse(parentId);
-        path = `${this.files.itemPath(driveId, parentId)}:/${encodeURIComponent(name)}:`;
+        path = `${this.#files.itemPath(driveId, parentId)}:/${encodeURIComponent(name)}:`;
         uploadName = name;
       }
       // SharePoint's OData parser requires annotations before ordinary fields.
@@ -164,7 +167,7 @@ class FileTransfers {
       // name first yields HTTP 400 invalidRequest on affected hosts.
       // https://github.com/microsoftgraph/msgraph-sdk-java/issues/1351
       const item = { "@microsoft.graph.conflictBehavior": itemId ? "replace" : "fail", name: uploadName };
-      const create = (deferred) => this.files.json(`${path}/createUploadSession`, {
+      const create = (deferred) => this.#files.json(`${path}/createUploadSession`, {
         method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json", ...(itemId ? { "If-Match": expectedETag } : {}) },
         body: JSON.stringify({ item, ...(deferred ? { deferCommit: true } : {}) }),
       });
@@ -179,12 +182,12 @@ class FileTransfers {
         commitMode = "automatic";
       }
       const expires = Date.parse(session.expirationDateTime);
-      if (!Number.isFinite(expires) || expires <= this.now()) throw new Error("Microsoft returned an expired transfer session.");
+      if (!Number.isFinite(expires) || expires <= this.#now()) throw new Error("Microsoft returned an expired transfer session.");
       return this.remember({ direction: "upload", status: "active", driveId, itemId, parentId, name: uploadName, eTag: expectedETag, size, offset: 0, commitMode, expectedSha256: expectedSha256?.toLowerCase(), hash: createHash("sha256"), uploadUrl: transferUrl(session.uploadUrl), serverExpires: expires });
-    } finally { this.starts--; }
+    } finally { this.#starts--; }
   }
   async sessionRequest(transfer, options = {}, allowStatus = []) {
-    const response = await this.files.request(transfer.uploadUrl, { ...options, headers: { Accept: "application/json", ...options.headers } }, false, { details: true, maxBytes: 65536, allowStatus });
+    const response = await this.#files.request(transfer.uploadUrl, { ...options, headers: { Accept: "application/json", ...options.headers } }, false, { details: true, maxBytes: 65536, allowStatus });
     if (!response.body) throw new Error("Unexpected upload-session redirect.");
     return { status: response.status, data: response.body.length && ![404, 410].includes(response.status) ? parseJson(response.body) : null };
   }
@@ -307,7 +310,7 @@ class FileTransfers {
     return this.withTransfer(transferId, async (transfer) => {
       if (transfer.status === "completed") return { ...this.describe(transfer), instruction: "The file is already saved; cancelling a transfer cannot delete or revert it." };
       if (transfer.uploadUrl) {
-        const response = await this.files.request(transfer.uploadUrl, { method: "DELETE" }, false, { details: true, maxBytes: 65536, allowStatus: [404, 410] });
+        const response = await this.#files.request(transfer.uploadUrl, { method: "DELETE" }, false, { details: true, maxBytes: 65536, allowStatus: [404, 410] });
         if (![204, 404, 410].includes(response.status)) throw new Error("Microsoft did not confirm cancellation. Inspect the transfer before continuing.");
       }
       const uncertain = transfer.status === "uncertain" || transfer.status === "unknown";

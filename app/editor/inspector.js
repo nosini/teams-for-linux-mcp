@@ -98,22 +98,26 @@ const globalNames = ["monaco", "monacoGetEditors", "monacoGetModels", "lexical",
 const adapterNames = ["lexicalEditorHandle", "lexicalGetEditorState", "lexicalUpdate", "prosemirrorViewHandle", "codeMirrorHandle", "codeMirrorViewLink", "codeMirrorTileLink", "codeMirror6ViewHandle", "codeMirrorDispatch", "codeMirrorStateHandle", "codeMirrorContentDOMMatches", "quillHandle", "reactFiberHandle"];
 
 class SurfaceInspector {
+  #getWebContents;
+  #timeoutMs;
+  #maxFrames;
+
   constructor(getWebContents, { maxFrames = 64, timeoutMs = 2000 } = {}) {
-    this.getWebContents = getWebContents;
-    this.maxFrames = maxFrames;
-    this.timeoutMs = timeoutMs;
+    this.#getWebContents = getWebContents;
+    this.#maxFrames = maxFrames;
+    this.#timeoutMs = timeoutMs;
   }
 
   collect() {
     const entries = [];
-    for (const contents of this.getWebContents()) {
+    for (const contents of this.#getWebContents()) {
       try {
         if (contents.isDestroyed()) continue;
         for (const frame of contents.mainFrame.framesInSubtree) {
           try {
             const metadata = frameMetadata(frame.url);
             if (!metadata || frame.detached) continue;
-            if (entries.length >= this.maxFrames) return { entries, truncated: true };
+            if (entries.length >= this.#maxFrames) return { entries, truncated: true };
             entries.push({ frame, url: frame.url, metadata: { id: `${contents.id}:${frame.processId}:${frame.routingId}`, webContentsId: contents.id, ...metadata } });
           } catch { /* Detached frame. */ }
         }
@@ -131,7 +135,7 @@ class SurfaceInspector {
     const entry = this.collect().entries.find(({ metadata }) => metadata.id === id);
     if (!entry || !entry.metadata.inspectable) throw new Error("Select an inspectable frame from editor_list_frames.");
     try {
-      const value = await evaluateInFrame(entry.frame, PROBE_SOURCE, this.timeoutMs, "Probe timeout");
+      const value = await evaluateInFrame(entry.frame, PROBE_SOURCE, this.#timeoutMs, "Probe timeout");
       if (entry.frame.detached || entry.frame.url !== entry.url) throw new Error("Frame navigated");
       const booleans = (data, keys) => Object.fromEntries(keys.map((key) => [key, data?.[key] === true]));
       return {
