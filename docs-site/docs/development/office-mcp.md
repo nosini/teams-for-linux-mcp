@@ -357,9 +357,83 @@ execution. Results are discarded if the frame navigates or detaches during the
 probe. Presence does not establish a working live-editing or coauthor bridge.
 
 These diagnostics help investigate the native SharePoint/OneDrive Markdown
-editor. They do not add Markdown edits yet. Restart Teams and reconnect the
+editor. The separate experimental adapter below enables bounded model editing. Restart Teams and reconnect the
 agent after updating the code, then open the test Markdown editor before
 listing/probing its frames.
+
+## Experimental CodeMirror adapter
+
+Enable `mcp.codemirror.enabled` with `mcp.enabled` and restart. This adds three
+tools independently of the Word/Excel add-ins:
+
+| Tool | Arguments | Behavior |
+| --- | --- | --- |
+| `codemirror_list_editors` | None | Discover supported running CodeMirror 6 models in SharePoint HTTPS frames |
+| `codemirror_read_text` | `editorId`, optional `start` (0), `count` (4096, max 8192) | Bounded live model window and two-minute single-use read token |
+| `codemirror_replace_text` | `editorId`, `readToken`, `start`, `end`, `text` | Native transaction replacing half-open UTF-16 range; equal offsets insert, empty text deletes |
+
+Use a listed editor ID, not a positional DOM index. Discovery returns editor
+length and read-only status, never text or document URLs. IDs are session-local,
+not file IDs or names. Identify the intended file/editor with the user. Discovery
+bounds frame fanout at 16 and returned editors at 32, reporting truncation and
+unavailable frames/instances. Unsupported editors have no file-upload fallback.
+
+The renderer adapter in `app/editor/codeMirrorCommand.js` supports known `cmView`
+and `cmTile` DOM-link generations, following bounded own-data parent links to
+find an existing view. It verifies the root/content DOM identities and a usable
+CodeMirror document/configuration. It does not import its own editor library,
+reconfigure the host, rewrite DOM text or accept executable caller code.
+`app/editor/codeMirrorBridge.js` limits access to HTTPS SharePoint frames and
+retains full frame URLs only internally for navigation checks. Registry and
+snapshot state stays in the target renderer under a per-bridge random key.
+
+Reads use the model's `sliceString` rather than virtualized visible DOM text.
+Windows and edits use UTF-16 code units, LF line endings and a maximum 8,192
+units per operation, capped at 32 KiB in JSON. A read window's end is shortened
+when necessary to avoid splitting a surrogate pair; a starting offset inside a
+pair is rejected. Edits cannot split pairs, insert unpaired surrogates, CR/NUL or
+Unicode paragraph separators. The edited range must lie entirely inside the
+read window. Larger documents are read using `nextStart`.
+
+Snapshot tokens bind editor/root/view identity, URL, the immutable document
+reference, editor configuration and read-window text. Selection-only changes
+are allowed; any document revision or configuration change invalidates the
+snapshot. Snapshots expire after two minutes; at most 64 are retained. A valid
+write attempt consumes its token before dispatch. Read-only state and IME
+composition block writes. Comparison and dispatch run synchronously in one
+renderer invocation, with no awaited work between them. This does not imply a
+server-side lock against remote coauthors or a persisted cloud revision.
+
+Edits call the existing view's `dispatch` with a bounded changes specification
+and `userEvent: "input"`. Host transaction filters, dispatch overrides and update
+listeners remain responsible for processing edits. Model readback must confirm
+the inserted text and resulting length; filtered/deferred/throwing operations
+report an uncertain outcome, with no retry or force-write fallback. Successful
+results confirm local application only and always report `saveStatus:
+"unverified"`. Cloud autosave and coauthor behavior require live validation.
+
+Focused checks: `node --test tests/unit/codeMirrorBridge.test.js` and
+`npm run lint`. The optional `tests/integration/codeMirrorModel.js` runs against
+actual `@codemirror/view`, `@codemirror/state` and `jsdom` installed in a separate
+test environment; these are not production dependencies. It checks native
+updates/listeners, stale revisions, selection-only changes, read-only state and
+transaction filtering. It does not test SharePoint's persistence/transport.
+
+A live test on 2026-10-21 verified model reads and native heading replacement
+in the SharePoint Markdown editor, followed by an independent Graph download
+confirming autosaved text and a changed eTag. Reusing the consumed token was
+rejected. A subsequent edit in a separate browser reached the already-open
+Teams model without reloading, including text newer than the saved snapshot.
+This verifies incoming browser-to-Teams live updates. Unused-token rejection
+after a coauthor edit, simultaneous outbound propagation and other native editor
+variants still need dedicated tests.
+The per-operation `saveStatus` remains unverified until the caller independently
+checks persistence.
+
+API reference:
+[CodeMirror view source](https://github.com/codemirror/view/blob/main/src/editorview.ts),
+[older DOM links](https://github.com/codemirror/view/blob/6.38.6/src/contentview.ts),
+[immutable state](https://github.com/codemirror/state/blob/main/src/state.ts).
 
 ## Local connection and implementation
 

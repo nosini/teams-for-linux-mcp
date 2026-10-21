@@ -11,6 +11,9 @@
         "files": {
           "enabled": false
         },
+        "codemirror": {
+          "enabled": false
+        },
         "addin": {
           "enabled": false,
           "port": 39847
@@ -24,6 +27,12 @@
           "type": "boolean",
           "default": false,
           "description": "Expose MCP tools over a private Unix socket for local agents. Enable addin.enabled for live Excel/Word tools and files.enabled for channel file reads and writes."
+        },
+        {
+          "path": "codemirror.enabled",
+          "type": "boolean",
+          "default": false,
+          "description": "Enable experimental live text reads and edits in native SharePoint CodeMirror 6 editors (including Markdown). Requires mcp.enabled and restart; no Office add-in required. Uses version-specific editor handles and native transactions. Save/coauthor compatibility needs live validation. Grants local MCP agents live editor write access."
         },
         {
           "path": "files.enabled",

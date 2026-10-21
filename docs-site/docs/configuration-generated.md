@@ -10,7 +10,7 @@ For configuration examples, file locations, and platform-specific notes, see the
 
 | Option | Type | Default | Description | Apply |
 |--------|------|---------|-------------|-------|
-| `mcp` | `object` | `{"enabled":false,"files":{"enabled":false},"addin":{"enabled":false,"port":39847}}` | Local MCP access to Office diagnostics, an optional Excel/Word add-in bridge and optional channel file reads and writes. Requires restart. | `restart` |
+| `mcp` | `object` | `{"enabled":false,"files":{"enabled":false},"codemirror":{"enabled":false},"addin":{"enabled":false,"port":39847}}` | Local MCP access to Office diagnostics, an optional Excel/Word add-in bridge and optional channel file reads and writes. Requires restart. | `restart` |
 | `dbusControl` | `object` | `{"enabled":false,"busName":""}` | Opt-in Linux user session D-Bus control and observed Teams state. Requires restart. | `restart` |
 | `appActiveCheckInterval` | `number` | `2` | A numeric value in seconds as poll interval to check if the system is active from being idle | `restart` |
 | `screenSharing` | `object` | `{"thumbnail":{"enabled":true,"alwaysOnTop":true},"lockInhibitionMethod":"Electron"}` | Screen sharing configuration. thumbnail: controls the preview window shown during active sharing. lockInhibitionMethod: screen lock inhibition method (Electron/WakeLockSentinel). | `restart` |
@@ -106,6 +106,7 @@ Object options group several related settings. The tables below list each nested
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `mcp.enabled` | `boolean` | `false` | Expose MCP tools over a private Unix socket for local agents. Enable addin.enabled for live Excel/Word tools and files.enabled for channel file reads and writes. |
+| `mcp.codemirror.enabled` | `boolean` | `false` | Enable experimental live text reads and edits in native SharePoint CodeMirror 6 editors (including Markdown). Requires mcp.enabled and restart; no Office add-in required. Uses version-specific editor handles and native transactions. Save/coauthor compatibility needs live validation. Grants local MCP agents live editor write access. |
 | `mcp.files.enabled` | `boolean` | `false` | Expose channel file discovery, downloads and uploads using the signed-in Teams session. Requires mcp.enabled and restart. Limited by the existing Microsoft permissions; file transfers are capped at 1 MiB. Grants local MCP agents file write access. No Office add-in required. |
 | `mcp.addin.enabled` | `boolean` | `false` | Serve the Office task pane over loopback HTTPS and enable live Excel/Word tools. Requires OpenSSL for local certificate creation and uploading the generated add-in manifest in the corresponding Office application. |
 | `mcp.addin.port` | `number` | `39847` | Loopback HTTPS port for the Office add-ins (1024–65535). Changing it requires uploading the regenerated manifests again. |

@@ -164,6 +164,48 @@ Excel tools use ExcelApi 1.1. Unsupported hosts return a clear error. See the
 names, arguments and limits. The new tools have automated and simulated
 Electron coverage; real Office compatibility still needs live testing.
 
+## Experimental live Markdown editing
+
+The native SharePoint Markdown editor uses CodeMirror. A separate opt-in enables
+MCP reads and edits of the running CodeMirror 6 model, without an Office add-in:
+
+```json
+{ "mcp": { "enabled": true, "codemirror": { "enabled": true } } }
+```
+
+Or launch from this checkout with:
+
+```sh
+npm start -- --mcp.enabled --mcp.addin.enabled --mcp.files.enabled --mcp.codemirror.enabled
+```
+
+Restart Teams, reopen the Markdown file, and reconnect the agent. Container
+users need a recreated container to refresh the socket mount. Ask the agent to
+call `codemirror_list_editors`, identify the intended editor, and read it with
+`codemirror_read_text`. Unsupported editor instances are reported as unavailable.
+IDs identify running editors, not persistent file names.
+
+`codemirror_replace_text` edits a selected range through the existing editor's
+transaction method. It requires a recent read token and rejects changes to the
+entire document revision since that read. It also rejects read-only editors and
+active IME composition. It never replaces the file through Graph or rewrites
+visible DOM text. Reads include unsaved content from the editor model.
+
+Offsets use UTF-16 code units, with half-open `[start,end)` edit ranges. Text
+uses LF newlines; insertion/replacement is limited to 8,192 characters and must
+fit the window that was read. Equal offsets insert; empty text deletes. Reads
+return `nextStart` for larger files and avoid splitting Unicode surrogate pairs.
+Tokens expire after two minutes and are single-use. Any document text change,
+including one outside the selected window, requires a fresh read.
+
+This adapter uses version-specific editor handles. Automated tests against real
+CodeMirror verify native transaction dispatch and update listeners, not the
+SharePoint collaboration service. Successful edits return `saveStatus:
+"unverified"`: local model readback is confirmed, but cloud saving and other
+users' views must be checked in a live disposable file. Never automatically
+retry a timed-out, filtered or otherwise uncertain edit; read current state
+first. No new synchronization service or file-upload fallback is added.
+
 ## Read and write channel files
 
 Channel file access is a separate opt-in. With this version running, merge into

@@ -29,13 +29,17 @@ const defaults = require("./defaults");
 
 module.exports = {
       mcp: {
-        default: { enabled: false, files: { enabled: false }, addin: { enabled: false, port: 39847 } },
+        default: { enabled: false, files: { enabled: false }, codemirror: { enabled: false }, addin: { enabled: false, port: 39847 } },
         describe: "Local MCP access to Office diagnostics, an optional Excel/Word add-in bridge and optional channel file reads and writes. Requires restart.",
         type: "object",
         fields: {
           enabled: {
             type: "boolean",
             describe: "Expose MCP tools over a private Unix socket for local agents. Enable addin.enabled for live Excel/Word tools and files.enabled for channel file reads and writes.",
+          },
+          "codemirror.enabled": {
+            type: "boolean",
+            describe: "Enable experimental live text reads and edits in native SharePoint CodeMirror 6 editors (including Markdown). Requires mcp.enabled and restart; no Office add-in required. Uses version-specific editor handles and native transactions. Save/coauthor compatibility needs live validation. Grants local MCP agents live editor write access.",
           },
           "files.enabled": {
             type: "boolean",

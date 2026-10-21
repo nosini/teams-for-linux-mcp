@@ -3,7 +3,7 @@ const { z } = require("zod");
 const { rangeShape, validateData } = require("../office/addin/operations");
 const { validateText, paragraphIdPattern } = require("../office/addin/wordOperations");
 
-function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null, surfaceInspector = null) {
+function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null, surfaceInspector = null, codeMirrorBridge = null) {
   const server = new McpServer({ name: "teams-for-linux-office", version: "0.1.0" }, {
     instructions: liveBridge ? "List connected documents first and choose tools matching the application. Excel writes require a read token from the same worksheet and range. Word text edits require a read token from the same paragraph; literal replacements require exactly one matching occurrence. Formatting and structure tools specify their own inspection tokens. Inspect comments/revisions before explicitly editing them; do not automatically change tracking mode or accept/reject changes. Do not automatically retry a timed-out write. API presence diagnostics alone do not indicate a live bridge." : "This server discovers Office frames in Teams. API presence is diagnostic only. Channel file tools, when enabled, use the signed-in Teams session. List teams, channels and files before choosing a file. Do not automatically retry timed-out writes.",
   });
@@ -96,6 +96,7 @@ function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null
   }
   if (liveBridge) require("./editingTools").registerEditingTools(server, liveBridge);
   if (channelFiles) require("./channelFiles").registerChannelFileTools(server, channelFiles);
+  if (codeMirrorBridge) require("./codeMirrorTools").registerCodeMirrorTools(server, codeMirrorBridge);
   return server;
 }
 

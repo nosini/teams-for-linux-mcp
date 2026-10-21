@@ -833,9 +833,14 @@ async function handleAppReady() {
           fileGraph.initialize(mainAppWindow.getWindow());
           channelFiles = new ChannelFiles(fileGraph);
         }
+        let codeMirrorBridge = null;
+        if (config.mcp.codemirror?.enabled === true) {
+          const { CodeMirrorBridge } = require("./editor/codeMirrorBridge");
+          codeMirrorBridge = new CodeMirrorBridge(surfaceInspector);
+        }
         officeMcpEndpoint = await startLocalEndpoint({
           directory: path.join(app.getPath("userData"), "mcp"),
-          createServer: () => createOfficeMcpServer(inspector, liveBridge, channelFiles, surfaceInspector),
+          createServer: () => createOfficeMcpServer(inspector, liveBridge, channelFiles, surfaceInspector, codeMirrorBridge),
         });
         console.info(`[MCP] Office diagnostics available at ${officeMcpEndpoint.socketPath}`);
       } catch (error) {
