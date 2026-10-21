@@ -223,6 +223,33 @@ describe("Office MCP endpoint", { timeout: 10000 }, () => {
     await assert.rejects(fs.stat(socketPath), { code: "ENOENT" });
   });
 
+  it("serves channel uploads larger than 64 KiB through the actual MCP socket", async (t) => {
+    const { ChannelFiles } = require("../../app/mcp/channelFiles");
+    const directory = await testDirectory(t);
+    const uploaded = [];
+    const files = new ChannelFiles({ acquireToken: async () => ({ success: true, token: "private" }) }, async (_url, options) => {
+      uploaded.push(options.body);
+      return Response.json({ id: "new-file", name: "test.txt", file: {}, eTag: '"one"', "@microsoft.graph.downloadUrl": "private-link" });
+    });
+    const endpoint = await startLocalEndpoint({ directory, createServer: () => createOfficeMcpServer(new OfficeInspector(() => []), null, files) });
+    const socket = net.createConnection(endpoint.socketPath);
+    await once(socket, "connect");
+    const client = rpcReader(socket, socket);
+    t.after(async () => { client.close(); socket.destroy(); await endpoint.close(); });
+    await initialize(client);
+    const listing = await client.request("tools/list");
+    assert.equal(listing.result.tools.filter((tool) => tool.name.startsWith("teams_")).length, 7);
+    const bytes = Buffer.alloc(128 * 1024, 65);
+    const response = await client.request("tools/call", { name: "teams_create_file", arguments: { driveId: "d", parentId: "p", name: "test.txt", contentBase64: bytes.toString("base64") } });
+    assert.equal(response.result.isError, undefined);
+    assert.equal(response.result.structuredContent.item.id, "new-file");
+    assert.deepEqual(uploaded, [bytes]);
+    assert.doesNotMatch(JSON.stringify(response), /private/);
+    const invalid = await client.request("tools/call", { name: "teams_create_file", arguments: { driveId: "d", parentId: "p", name: "../bad", contentBase64: "" } });
+    assert.ok(invalid.error || invalid.result?.isError);
+    assert.equal(uploaded.length, 1);
+  });
+
   it("fails the stdio adapter clearly when Teams is not running", async (t) => {
     const directory = await testDirectory(t);
     const child = spawn(process.execPath, [path.resolve(__dirname, "../../app/mcp/stdio.js"), path.join(directory, "missing.sock")]);

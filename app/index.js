@@ -824,9 +824,16 @@ async function handleAppReady() {
           console.info(`[MCP] Upload this Excel add-in manifest: ${officeAddinHost.manifestPath}`);
           console.info(`[MCP] Upload this Word add-in manifest: ${officeAddinHost.wordManifestPath}`);
         }
+        let channelFiles = null;
+        if (config.mcp.files?.enabled === true) {
+          const { ChannelFiles } = require("./mcp/channelFiles");
+          const fileGraph = new GraphApiClient({ graphApi: { enabled: true } });
+          fileGraph.initialize(mainAppWindow.getWindow());
+          channelFiles = new ChannelFiles(fileGraph);
+        }
         officeMcpEndpoint = await startLocalEndpoint({
           directory: path.join(app.getPath("userData"), "mcp"),
-          createServer: () => createOfficeMcpServer(inspector, liveBridge),
+          createServer: () => createOfficeMcpServer(inspector, liveBridge, channelFiles),
         });
         console.info(`[MCP] Office diagnostics available at ${officeMcpEndpoint.socketPath}`);
       } catch (error) {

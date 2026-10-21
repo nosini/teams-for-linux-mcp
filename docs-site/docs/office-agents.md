@@ -117,3 +117,55 @@ out write, read back before attempting another write.
 
 See the [development guide](development/office-mcp.md) for tool arguments, limits,
 and implementation details.
+
+## Read and write channel files
+
+Channel file access is a separate opt-in. With this version running, merge into
+`config.json` and restart Teams:
+
+```json
+{ "mcp": { "enabled": true, "files": { "enabled": true } } }
+```
+
+From the source checkout you can instead launch with:
+
+```sh
+npm start -- --mcp.enabled --mcp.files.enabled
+```
+
+Keep `addin.enabled` enabled too if you use live Word and Excel editing. File
+tools do not require an add-in or `graphApi.enabled`. Reconnect your agent after
+restarting Teams; container agents need their socket bind recreated as described
+above. An installed Flatpak must first be rebuilt with this version of the code.
+
+Ask the agent to list teams, list a team's channels, resolve a channel's Files
+folder, and list its files. The tools are `teams_list_teams`,
+`teams_list_channels`, `teams_get_channel_folder`, `teams_list_files`,
+`teams_read_file`, `teams_create_file` and `teams_replace_file`. Listings return
+`nextCursor`; pass it back as `cursor` with the same team/folder to continue.
+If team/channel discovery is denied, the agent can still try resolving the file
+folder with team and channel IDs from a Teams channel link you provide.
+
+Transfers use base64 bytes and are limited to **1 MiB per file**. These tools can
+read binary formats, but interpreting or modifying a DOCX/XLSX package requires
+format-aware tooling. Use the existing Word/Excel tools for edits in open Office
+documents. Replacement uploads replace the complete file, rather than merging
+Office changes. A replacement requires `expectedETag` from a recent file read;
+the server checks it again and sends `If-Match`. This safeguard and creation's
+conflict-failure behavior still require live validation against your tenant;
+coordinate edits while testing. Do not automatically repeat a timed-out upload:
+list/read the destination first to determine whether it succeeded.
+
+The server reuses the signed-in Teams session. It does not request new Microsoft
+permissions and does not expose its access token or temporary download links to
+the agent. HTTP 403 means the session lacks permission or organization policy
+blocks the operation; enabling MCP does not grant additional SharePoint rights.
+Discovery, reading and writing can have different permissions. Microsoft's
+[folder lookup](https://learn.microsoft.com/en-us/graph/api/channel-get-filesfolder?view=graph-rest-1.0)
+and [upload documentation](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0)
+list the required permissions.
+
+For a first live test, choose a test channel, list its files, then ask the agent
+to create a uniquely named `mcp-file-test.txt`, read it back, replace it using the
+returned eTag, and read it back again. Use a disposable file for testing conflict
+handling with another editor. File deletion is not exposed by these tools.

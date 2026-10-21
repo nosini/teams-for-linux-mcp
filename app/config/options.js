@@ -29,13 +29,17 @@ const defaults = require("./defaults");
 
 module.exports = {
       mcp: {
-        default: { enabled: false, addin: { enabled: false, port: 39847 } },
-        describe: "Local MCP access to Office diagnostics and an optional Excel/Word add-in bridge. Requires restart.",
+        default: { enabled: false, files: { enabled: false }, addin: { enabled: false, port: 39847 } },
+        describe: "Local MCP access to Office diagnostics, an optional Excel/Word add-in bridge and optional channel file reads and writes. Requires restart.",
         type: "object",
         fields: {
           enabled: {
             type: "boolean",
-            describe: "Expose Office diagnostics over a private Unix socket for local agents. Enable addin.enabled separately for live Excel and Word tools.",
+            describe: "Expose MCP tools over a private Unix socket for local agents. Enable addin.enabled for live Excel/Word tools and files.enabled for channel file reads and writes.",
+          },
+          "files.enabled": {
+            type: "boolean",
+            describe: "Expose channel file discovery, downloads and uploads using the signed-in Teams session. Requires mcp.enabled and restart. Limited by the existing Microsoft permissions; file transfers are capped at 1 MiB. Grants local MCP agents file write access. No Office add-in required.",
           },
           "addin.enabled": {
             type: "boolean",

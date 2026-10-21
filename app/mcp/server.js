@@ -3,9 +3,9 @@ const { z } = require("zod");
 const { rangeShape, validateData } = require("../office/addin/operations");
 const { validateText, paragraphIdPattern } = require("../office/addin/wordOperations");
 
-function createOfficeMcpServer(inspector, liveBridge = null) {
+function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null) {
   const server = new McpServer({ name: "teams-for-linux-office", version: "0.1.0" }, {
-    instructions: liveBridge ? "List connected documents first and choose tools matching the application. Excel writes require a read token from the same worksheet and range. Word replacements require a read token from the same paragraph and exactly one matching text occurrence. Do not automatically retry a timed-out write. API presence diagnostics alone do not indicate a live bridge." : "This server discovers Office frames in Teams. It cannot yet read or edit document content. API presence is diagnostic only.",
+    instructions: liveBridge ? "List connected documents first and choose tools matching the application. Excel writes require a read token from the same worksheet and range. Word replacements require a read token from the same paragraph and exactly one matching text occurrence. Do not automatically retry a timed-out write. API presence diagnostics alone do not indicate a live bridge." : "This server discovers Office frames in Teams. API presence is diagnostic only. Channel file tools, when enabled, use the signed-in Teams session. List teams, channels and files before choosing a file. Do not automatically retry timed-out writes.",
   });
   const annotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
   const result = (value) => ({ content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value });
@@ -81,6 +81,7 @@ function createOfficeMcpServer(inspector, liveBridge = null) {
       }, ({ documentId: id, ...args }) => respond(() => liveBridge.execute(id, operation, args)));
     }
   }
+  if (channelFiles) require("./channelFiles").registerChannelFileTools(server, channelFiles);
   return server;
 }
 

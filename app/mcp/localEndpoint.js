@@ -45,7 +45,7 @@ async function startLocalEndpoint({ directory, createServer }) {
     }
     // The SDK supports separate streams, including a duplex Unix socket. Its
     // stdio binding negotiates both legacy and current MCP clients for us.
-    const transport = new StdioServerTransport(socket, socket, { maxBufferSize: 64 * 1024 });
+    const transport = new StdioServerTransport(socket, socket, { maxBufferSize: 2 * 1024 * 1024 });
     const handle = serveStdio(createServer, {
       transport,
       onerror: () => socket.destroy(),
