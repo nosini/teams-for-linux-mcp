@@ -152,6 +152,27 @@ hosts with a 1,200 ms menu delay; they measure the orchestration overhead and do
 not predict Microsoft's network or workbook load time. Fresh-file live timing
 of this optimized automatic path remains unverified.
 
+A first real Word test reached a live Bridge and verified session-local
+paragraph IDs, paragraph reads, insertion, exact literal replacement and deleting
+the inserted paragraph. Fresh reads confirmed the original paragraphs and that
+the test paragraph no longer existed. Tracking was Off and the target had no
+comments or revisions; no review settings were changed. The window was shown
+at Microsoft's sign-in page, then hidden for import and all document operations.
+The successful import job reported 37,766 ms while UI fixes were being applied,
+so this is not a clean benchmark of the final implementation.
+
+Word's compact Home ribbon put Add-ins under More options. The fixed
+`ribbonOverflow` action recognizes English/Dutch More options only in the named
+Ribbon/Lint toolbar and only when Add-ins is absent. It is distinct from
+`moreSettings` inside the add-in catalog, so both can occur in one job. Add-ins
+menu items can inherit `pointer-events:none` from their portal while accepting
+native Enter. Home preparation and its keyboard obstruction guard apply to
+ribbon commands, excluding menu/dialog descendants. Explicit mouse mode retains
+all hit tests. The Electron Word fixture covers this overflow path before the
+existing Advanced/catalog/manifest flow; unrelated More options buttons remain
+excluded. The focused smoke covers hidden menu keyboard activation and the
+existing obstruction guard for ribbon commands.
+
 Live diagnosis found two UI differences now covered by the Electron fixture:
 Office renders the visible Add-ins menu beneath `visibility:hidden` portal
 containers, with `visibility:visible` on descendants. Visibility checks must use

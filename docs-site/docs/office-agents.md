@@ -123,9 +123,12 @@ state, plus button dimensions, clipping and the hit element's tag/role. Blocker
 text and identifiers are excluded. This helps investigate `CONTROL_OBSCURED`
 without sending another click.
 `office_bridge_setup_step` accepts only named setup actions such as `home`,
-`addins`, `advanced`, `moreSettings`, `uploadEntry`, `selectManifest`, `submit`
+`ribbonOverflow`, `addins`, `advanced`, `moreSettings`, `uploadEntry`,
+`selectManifest`, `submit`
 and `trust`. The Advanced flow is Add-ins → Advanced → Upload My Add-in →
-select this app's manifest → Upload. File selection supplies the manifest to
+select this app's manifest → Upload. Word's compact Home ribbon can place
+Add-ins under More options; `ribbonOverflow` opens that menu only within the
+named ribbon toolbar. File selection supplies the manifest to
 the dialog's file input without opening the native Browse picker.
 The default `auto` interaction uses Chromium Enter for recognized controls.
 `nativeMouse` selects mouse input explicitly; `native` also uses Enter.
@@ -165,8 +168,14 @@ that test, so use the actual file link when needed.
 The tab manager has also been tested in Electron with two Excel documents and
 one Word document using simulated Office.js hosts, including parallel edits,
 showing/hiding the window, and closing one tab without unloading the others.
-Real Word background editing and simultaneous editing of multiple real files
-remain unverified.
+A real SharePoint Word document has also passed first-time Bridge import,
+paragraph reads, insertion, literal replacement and deletion of a temporary test
+paragraph. Import and editing ran hidden after the window was shown at the
+Microsoft sign-in page. The original paragraphs were unchanged afterward.
+Word's overflow-menu path needed a UI correction during that test; the reported
+37.8-second successful import run included debugging and is not a clean startup
+benchmark. Fully hidden Word sign-in and simultaneous edits to multiple real
+files remain unverified.
 
 ## Connect a local agent
 

@@ -21,7 +21,7 @@ function setupFrame(frame, editor) {
   return false;
 }
 
-const setupActions = ["home", "insert", "addins", "getAddins", "advanced", "moreSettings", "moreAddins", "manage", "myAddins", "uploadEntry", "bridge", "selectManifest", "submit", "trust"];
+const setupActions = ["home", "insert", "ribbonOverflow", "addins", "getAddins", "advanced", "moreSettings", "moreAddins", "manage", "myAddins", "uploadEntry", "bridge", "selectManifest", "submit", "trust"];
 
 async function executeBridgeSetupStep(contents, manifests, action, interaction = "pointer") {
   if (!setupActions.includes(action) || !["click", "pointer", "native", "nativeMouse", "auto"].includes(interaction)) throw new Error("Choose a supported Bridge setup action and interaction.");
@@ -160,7 +160,7 @@ async function runBridgeSetup({ contents, manifests, listDocuments, update, sign
         await wait(pollMs); continue;
       }
       const ribbon = probes.some(({ probe }) => probe.homeRequired) ? ["home", "addins", "insert"] : ["addins", "home", "insert"];
-      const priorities = submitted ? ["trust"] : ["trust", "bridge", "uploadEntry", "advanced", "manage", "moreSettings", "moreAddins", "myAddins", "getAddins", ...ribbon];
+      const priorities = submitted ? ["trust"] : ["trust", "bridge", "uploadEntry", "advanced", "manage", "moreSettings", "moreAddins", "myAddins", "getAddins", "ribbonOverflow", ...ribbon];
       let acted = false;
       for (const action of priorities) {
         if (clicked.has(action)) continue;

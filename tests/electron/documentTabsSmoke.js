@@ -145,6 +145,7 @@ app.whenReady().then(async () => {
         const editor = contents.mainFrame.framesInSubtree.find((frame) => frame.url.includes(".officeapps.live.com/x/edit"));
         const sourceAudit = await editor.executeJavaScript("importAudit");
         assert.equal(sourceAudit.advanced, 1, "Advanced must be activated before opening the upload window");
+        assert.equal(sourceAudit.overflow, word ? 1 : 0, "Word must open Add-ins through the named ribbon overflow only once");
         assert.equal(sourceAudit.gesture, true, "Authorized setup commands must have browser user activation");
         assert.equal(sourceAudit.blocked, 0);
         if (testingNative) assert.equal(sourceAudit.trusted, true, "Native activation must produce trusted click events");

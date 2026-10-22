@@ -99,6 +99,14 @@ async function bridgeSetupUi(command) {
     }
     if (matches.length === 1) actions[name] = matches[0];
   }
+  // Word's compact Home ribbon can put Add-ins under More options. Limit
+  // this intermediate step to the named ribbon toolbar, never a document
+  // or comment menu, and prefer an already exposed Add-ins command.
+  if (!actions.addins) {
+    const ribbons = queryAll('[role="toolbar"]').filter((element) => /^(ribbon|lint)$/.test(label(element)) && visible(element));
+    const overflow = controls.filter((element) => /^(more options|meer opties)$/.test(label(element)) && enabled(element) && ribbons.some((ribbon) => within(element, ribbon)));
+    if (overflow.length === 1) actions.ribbonOverflow = overflow[0];
+  }
   // Some Office versions put a plain Upload item under Manage My Add-ins.
   if (command.allowUploadMenu) {
     const matches = controls.filter((element) => /^(upload|uploaden)$/.test(label(element)) && enabled(element) && element.getAttribute("role") === "menuitem");
@@ -136,7 +144,7 @@ async function bridgeSetupUi(command) {
     };
   }
   if (command.type === "probe") return { actions: Object.keys(actions), uploadInput: !!input, expectedFile,
-    homeRequired: !!actions.home && !!actions.addins && locate(actions.addins).code === "CONTROL_OBSCURED" };
+    homeRequired: !!actions.home && !!actions.addins && !excluded(actions.addins, '[role="menu"],[role="dialog"],[role="alertdialog"]') && locate(actions.addins).code === "CONTROL_OBSCURED" };
   if (command.type === "fill") {
     if (!input || input.disabled || !/^(excel|word)-addin\.xml$/.test(command.filename)) return { performed: false };
     const transfer = new DataTransfer();
@@ -154,7 +162,7 @@ async function bridgeSetupUi(command) {
     // A collapsed ribbon leaves the Add-ins command behind the formula bar.
     // Do not activate it through that obstruction, even with the keyboard.
     // Missing layout in hidden frames is not itself evidence of an overlay.
-    if (command.type === "focus" && command.action === "addins") {
+    if (command.type === "focus" && command.action === "addins" && !excluded(target, '[role="menu"],[role="dialog"],[role="alertdialog"]')) {
       const position = locate(target);
       if (position.code === "CONTROL_OBSCURED") return position;
     }

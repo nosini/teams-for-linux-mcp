@@ -7,6 +7,7 @@ function officeImportFixture({ origin, application, file, store = false, panel =
     <section contenteditable="true"><button>private document text</button></section>
     <section role="document"><button>private document body</button></section>
     <input value="private input value">
+    <aside><button>More options</button></aside>
     <div role="textbox" tabindex="0" aria-label="private cell accessibility text"></div>
     <script>
     const application = ${JSON.stringify(application)};
@@ -26,7 +27,7 @@ function officeImportFixture({ origin, application, file, store = false, panel =
         ui.append(pane);
       }
     });
-    globalThis.importAudit = { advanced: 0, uploads: 0, browse: 0, file: null, type: null, blocked: 0, gesture: false, trusted: false };
+    globalThis.importAudit = { advanced: 0, overflow: 0, uploads: 0, browse: 0, file: null, type: null, blocked: 0, gesture: false, trusted: false };
     importAudit.mouse = [];
     for (const type of ['pointerdown', 'click']) document.addEventListener(type, event => importAudit.mouse.push({ type, trusted: event.isTrusted, target: event.target.tagName, label: event.target.textContent.slice(0, 40), x: event.clientX, y: event.clientY }), true);
     function button(text, fn, container = ui) {
@@ -97,11 +98,8 @@ function officeImportFixture({ origin, application, file, store = false, panel =
       });
       button(dutch ? 'Meer invoegtoepassingen' : 'More Add-ins', uploadEntry);
     }
-    if (${store}) uploadEntry();
-    else if (${panel}) { if (dutch) panelMenu(); else uploadEntry(); }
-    else button(dutch ? 'Start' : 'Home', () => {
-      ui.replaceChildren();
-      button(dutch ? 'Invoegtoepassingen' : 'Add-ins', () => {
+    function addins(container = ui) {
+      return button(dutch ? 'Invoegtoepassingen' : 'Add-ins', () => {
         ui.replaceChildren();
         // Exercise a menu that takes longer than the job's old 800ms delay.
         setTimeout(() => {
@@ -120,7 +118,19 @@ function officeImportFixture({ origin, application, file, store = false, panel =
         menu.append(privateGrid);
         button('private shadow cell value', () => {}, privateGrid);
         }, 1200);
-      });
+      }, container);
+    }
+    if (${store}) uploadEntry();
+    else if (${panel}) { if (dutch) panelMenu(); else uploadEntry(); }
+    else button(dutch ? 'Start' : 'Home', () => {
+      ui.replaceChildren();
+      if (!dutch) { addins(); return; }
+      const ribbon = document.createElement('div'); ribbon.setAttribute('role', 'toolbar'); ribbon.setAttribute('aria-label', 'Lint'); ui.append(ribbon);
+      button('Meer opties', () => {
+        importAudit.overflow++;
+        const overflow = document.createElement('div'); overflow.setAttribute('role', 'menu'); overflow.style.pointerEvents = 'none'; ui.append(overflow);
+        addins(overflow).setAttribute('role', 'menuitem');
+      }, ribbon);
     });
     </script>`;
 }

@@ -147,6 +147,21 @@ app.whenReady().then(async () => {
       update() {}, listDocuments: async () => ({ documents: await editor.executeJavaScript("prepared.includes('addins')") ? [{ webContentsId: window.webContents.id }] : [] }) });
     assert.equal(prepared.status, "connected");
     assert.deepEqual(await editor.executeJavaScript("prepared"), ["home", "addins"], "Automatic setup expands a collapsed ribbon once and waits until Add-ins is reachable");
+    await editor.executeJavaScript(`
+      document.body.innerHTML = '<button>More options</button><div role="toolbar" aria-label="Ribbon"><button id="overflow">More options</button></div>';
+      globalThis.overflowClicks = 0;
+      document.getElementById('overflow').onclick = () => {
+        overflowClicks++;
+        const menu = document.createElement('div'); menu.setAttribute('role', 'menu'); menu.style.pointerEvents = 'none';
+        const addins = document.createElement('button'); addins.textContent = 'Add-ins'; addins.setAttribute('role', 'menuitem');
+        addins.onclick = event => { if (event.isTrusted) overflowClicks++; }; menu.append(addins); document.body.append(menu);
+      };
+    `);
+    assert.equal((await executeBridgeSetupStep(window.webContents, manifests, "ribbonOverflow", "auto")).performed, true, "Ignore matching More options outside the named ribbon");
+    assert.equal((await executeBridgeSetupStep(window.webContents, manifests, "addins", "auto")).performed, true, "Keyboard activation reaches an Add-ins menu item whose portal has pointer events disabled");
+    assert.equal(await editor.executeJavaScript("overflowClicks"), 2);
+    await editor.executeJavaScript("document.querySelector('[role=toolbar]').remove(); document.querySelector('[role=menu]').remove()");
+    assert.equal((await executeBridgeSetupStep(window.webContents, manifests, "ribbonOverflow", "auto")).code, "CONTROL_NOT_FOUND", "Never use an unscoped More options menu");
     assert.equal(window.isVisible(), false);
     assert.equal(BrowserWindow.getFocusedWindow(), focusedWindow);
     assert.equal(webContents.getFocusedWebContents(), focusedContents);
