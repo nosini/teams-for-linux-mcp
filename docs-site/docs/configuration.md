@@ -540,6 +540,26 @@ This is on by default. Microsoft mints the cookie as session-scoped deliberately
 | `auth.keepMsalCacheEncryptionCookie.enabled` | `boolean` | `true` | Sets an expiration date for the 'msal.cache.encryption' cookie to keep it after restarts. |
 | `auth.keepMsalCacheEncryptionCookie.days` | `number` | `400` | Sets the amount of days the 'msal.cache.encryption' cookie should be kept for. Between 1 and 400. |
 
+#### SharePoint document sign-in
+
+The Office MCP Documents window shares the originating Teams account's browser
+profile. SharePoint may still issue session-only sign-in cookies that disappear
+when the app exits. The following separate option lets you retain those cookies
+for document sites you open; it is off by default and requires a restart.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `mcp.documentSession.enabled` | `boolean` | `false` | Add a local expiry to session-only authentication cookies for SharePoint sites opened in Documents and their shared SharePoint root cookie. |
+| `mcp.documentSession.days` | `number` | `7` | Local retention from 1–30 days; invalid values use seven days. |
+
+This retains sign-in cookies on disk in Electron's normal store. It changes
+neither Microsoft login cookies nor the expiry of cookies already persistent.
+The shared `rtFa` cookie keeps its existing `sharepoint.com` scope; site cookies
+remain limited to exact opened hosts. Security attributes are preserved.
+Server expiry, revocation and MFA requirements still apply. Turning it off
+stops further retention changes; sign out of the site to remove already retained
+cookies. See [Office agent access](office-agents.md) for setup and diagnostics.
+
 ### Multi-Account Profile Switcher (Experimental)
 
 > **Status:** Phase 1 shipped. With the flag enabled you get a bottom-left **account switcher pill** (dropdown with every profile + Add/Manage), a **Profiles** menu (Add / Switch / Manage / Remove profiles), `Ctrl+Alt+1…5` shortcuts for pinned profiles (pin via **Manage profiles…**, up to 5; Linux/Windows), first-run migration of your existing session into a default "My account" profile, and per-profile session isolation — each profile runs against its own `persist:teams-profile-{uuid}` partition so cookies, tokens, and storage never cross tenants. See [ADR-020](development/adr/020-multi-account-profile-switcher) for the full design and later phases (background notifications, power features).

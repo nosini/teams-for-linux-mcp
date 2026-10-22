@@ -17,6 +17,10 @@
         "addin": {
           "enabled": false,
           "port": 39847
+        },
+        "documentSession": {
+          "enabled": false,
+          "days": 7
         }
       },
       "description": "Local MCP access to Office diagnostics, an optional Excel/Word add-in bridge and optional channel file reads and writes. Requires restart.",
@@ -27,6 +31,18 @@
           "type": "boolean",
           "default": false,
           "description": "Expose MCP tools over a private Unix socket for local agents. Enable addin.enabled for live Excel/Word tools and files.enabled for channel file reads and writes."
+        },
+        {
+          "path": "documentSession.enabled",
+          "type": "boolean",
+          "default": false,
+          "description": "Opt in to retaining SharePoint document sign-in across app restarts. Adds a local expiry to session-only FedAuth/rtFa cookies (including numbered FedAuth fragments) for exact SharePoint sites opened in Documents, plus the shared sharepoint.com rtFa root cookie. Leaves Microsoft login cookies and unrelated site cookies unchanged. Cookies remain in Electron's normal store; Microsoft can still expire or revoke the session and require sign-in/MFA. Off by default; requires restart."
+        },
+        {
+          "path": "documentSession.days",
+          "type": "number",
+          "default": 7,
+          "description": "Local retention in days for document-session cookies, from 1 to 30; invalid values use 7. Does not extend Microsoft's server-side session validity."
         },
         {
           "path": "codemirror.enabled",

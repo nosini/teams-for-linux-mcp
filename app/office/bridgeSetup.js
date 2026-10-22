@@ -50,7 +50,12 @@ async function executeBridgeSetupStep(contents, manifests, action, interaction =
 async function inspectBridgeSetup(contents) {
   const all = contents.mainFrame.framesInSubtree;
   const editors = all.filter((frame) => ["excel", "word"].includes(classifyOfficeUrl(frame.url)?.application));
-  if (editors.length !== 1) throw new Error("Open one Excel or Word document in this tab before inspecting Bridge setup.");
+  if (editors.length > 1) throw new Error("Open one Excel or Word document in this tab before inspecting Bridge setup.");
+  if (!editors.length) return { application: null, frames: all.slice(0, 32).map((frame) => {
+    let origin;
+    try { origin = new URL(frame.url).origin; } catch { origin = "unavailable"; }
+    return { origin, eligible: false };
+  }), truncated: all.length > 32 };
   const editor = editors[0];
   let budget = 240, actionBudget = 40;
   const frames = await Promise.all(all.slice(0, 32).map(async (frame) => {
@@ -97,12 +102,14 @@ async function inspectBridgeSetup(contents) {
 
 // Bounded background job. Progress contains only fixed stage/error names; no
 // document URLs, renderer errors, UI text, file paths or manifest contents.
-async function runBridgeSetup({ contents, manifests, listDocuments, update, signal }, { timeoutMs = 45000, pollMs = 150, interaction = "auto" } = {}) {
+async function runBridgeSetup({ contents, manifests, listDocuments, update, signal, getAccount, accountScope }, { timeoutMs = 45000, pollMs = 150, signInGraceMs = 15000, interaction = "auto" } = {}) {
   const started = performance.now();
   const deadline = Date.now() + timeoutMs;
   let editor, editorUrl, application, selectedFrame, submitted = false, stage = "waiting_for_editor";
+  let signInStarted, signInPending = false;
+  let accountSelection;
   const clicked = new Set();
-  const result = (status, code) => ({ status, stage, submitted, elapsedMs: Math.round(performance.now() - started), ...(code ? { code } : {}) });
+  const result = (status, code) => ({ status, stage, submitted, elapsedMs: Math.round(performance.now() - started), ...(accountSelection ? { accountSelection } : {}), ...(code ? { code } : {}) });
   const report = () => update(result("running"));
   const wait = (ms) => new Promise((resolve) => {
     const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
@@ -125,7 +132,33 @@ async function runBridgeSetup({ contents, manifests, listDocuments, update, sign
       if (signal.aborted || contents.isDestroyed()) return result("needs_attention", "CANCELLED");
       if (documents.length) { stage = submitted ? "connected_after_upload" : "connected"; return result("connected"); }
       const all = contents.mainFrame.framesInSubtree;
-      if (all.some((frame) => { try { return ["login.microsoftonline.com", "login.microsoft.com", "login.live.com"].includes(new URL(frame.url).hostname); } catch { return false; } }) && !all.some((frame) => ["excel", "word"].includes(classifyOfficeUrl(frame.url)?.application))) return result("needs_attention", "SIGN_IN_REQUIRED");
+      signInPending = all.some((frame) => { try {
+        const url = new URL(frame.url);
+        return url.protocol === "https:" && !url.username && !url.password && !url.port &&
+          ["login.microsoftonline.com", "login.microsoft.com", "login.live.com"].includes(url.hostname);
+      } catch { return false; } }) && !all.some((frame) => ["excel", "word"].includes(classifyOfficeUrl(frame.url)?.application));
+      if (signInPending) {
+        // A normal SSO redirect visits the login host too. Let Microsoft use
+        // the existing session before asking the user to expose the window.
+        signInStarted ??= performance.now();
+        if (performance.now() - signInStarted >= signInGraceMs) return result("needs_attention", "SIGN_IN_REQUIRED");
+        if (stage !== "waiting_for_sign_in") { stage = "waiting_for_sign_in"; report(); }
+        if (getAccount && !accountSelection) {
+          const { inspectDocumentAccount, selectDocumentAccount } = require("./documentAccount");
+          const picker = await inspectDocumentAccount(contents, accountScope);
+          if (picker.picker && picker.tileCount > 0) {
+            // Record BEFORE dispatch. A timeout or navigation must not cause
+            // a second Enter or choosing a different account.
+            accountSelection = "attempted"; stage = "selecting_account"; report();
+            const selected = await selectDocumentAccount(contents, getAccount, signal, deadline);
+            if (signal.aborted || contents.isDestroyed()) return result("needs_attention", "CANCELLED");
+            if (!selected.performed) return result("needs_attention", selected.code);
+            accountSelection = "dispatched"; stage = "waiting_for_sign_in"; report();
+          }
+        }
+        await wait(pollMs); continue;
+      }
+      if (stage === "waiting_for_sign_in") { stage = "waiting_for_editor"; report(); }
       if (!editor) {
         const editors = all.filter((frame) => ["excel", "word"].includes(classifyOfficeUrl(frame.url)?.application));
         if (editors.length > 1) return result("needs_attention", "AMBIGUOUS_EDITOR");
@@ -197,7 +230,7 @@ async function runBridgeSetup({ contents, manifests, listDocuments, update, sign
       // when the next recognized control or live Bridge is still absent.
       if (!acted) await wait(pollMs);
     }
-    return result("needs_attention", signal.aborted || contents.isDestroyed() ? "CANCELLED" : submitted ? "BRIDGE_NOT_CONNECTED" : "IMPORT_UI_NOT_FOUND");
+    return result("needs_attention", signal.aborted || contents.isDestroyed() ? "CANCELLED" : signInPending ? "SIGN_IN_REQUIRED" : submitted ? "BRIDGE_NOT_CONNECTED" : "IMPORT_UI_NOT_FOUND");
   } catch {
     // Renderer failures may contain document content or URL parameters.
     return result("needs_attention", signal.aborted ? "CANCELLED" : submitted ? "UPLOAD_OUTCOME_UNKNOWN" : Date.now() >= deadline ? "IMPORT_UI_NOT_FOUND" : "SETUP_UI_UNAVAILABLE");

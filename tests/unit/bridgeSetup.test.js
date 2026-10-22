@@ -150,8 +150,45 @@ describe("Office Bridge import job", () => {
 
   it("reports sign-in without touching authentication controls", async () => {
     const { contents, options } = fixture();
+    contents.mainFrame.framesInSubtree = [{ url: "https://login.microsoftonline.com/common/authorize", executeJavaScript: () => assert.fail("Do not inspect login controls") }];
+    const result = await runBridgeSetup(options, { ...timing, signInGraceMs: 5 });
+    assert.equal(result.code, "SIGN_IN_REQUIRED");
+    assert.equal(result.stage, "waiting_for_sign_in");
+    assert.ok(result.elapsedMs >= 5);
+    assert.equal(result.submitted, false);
+  });
+
+  it("allows a silent sign-in redirect to finish without manual recovery", async () => {
+    const { contents, options, updates } = fixture();
+    const login = { url: "https://login.microsoftonline.com/common/authorize?private=secret", executeJavaScript: () => assert.fail("Do not touch login controls") };
+    contents.mainFrame.framesInSubtree = [login];
+    let polls = 0;
+    options.listDocuments = async () => {
+      if (++polls === 3) contents.mainFrame.framesInSubtree = [];
+      return { documents: polls === 4 ? [{ webContentsId: 9 }] : [] };
+    };
+    const result = await runBridgeSetup(options, timing);
+    assert.equal(result.status, "connected");
+    assert.equal(result.submitted, false);
+    assert.ok(updates.some((state) => state.stage === "waiting_for_sign_in"));
+    assert.ok(updates.some((state) => state.stage === "waiting_for_editor"));
+    assert.doesNotMatch(JSON.stringify([result, updates]), /private|secret|authorize/);
+  });
+
+  it("cancels during the silent sign-in wait", async () => {
+    const { contents, options, controller, updates } = fixture();
     contents.mainFrame.framesInSubtree = [{ url: "https://login.microsoftonline.com/common/authorize" }];
-    assert.equal((await runBridgeSetup(options, timing)).code, "SIGN_IN_REQUIRED");
+    options.update = (state) => { updates.push(state); if (state.stage === "waiting_for_sign_in") controller.abort(); };
+    const result = await runBridgeSetup(options, timing);
+    assert.equal(result.code, "CANCELLED");
+    assert.equal(result.submitted, false);
+  });
+
+  it("can inspect frame origins before an Office editor loads", async () => {
+    const { contents } = fixture();
+    contents.mainFrame.framesInSubtree = [{ url: "https://login.microsoftonline.com/common/authorize?private=secret", executeJavaScript: () => assert.fail("Do not inspect login controls") }];
+    assert.deepEqual(await inspectBridgeSetup(contents), { application: null,
+      frames: [{ origin: "https://login.microsoftonline.com", eligible: false }], truncated: false });
   });
 
   it("does not select between multiple documents in one tab", async () => {

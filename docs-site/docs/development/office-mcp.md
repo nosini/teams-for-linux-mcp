@@ -149,8 +149,82 @@ ribbon switching or a second Upload. Each progress/result includes monotonic
 A before/after run of the same three-document Electron import fixture measured
 7,352 ms before these changes and 1,839 ms afterward. These are simulated Office
 hosts with a 1,200 ms menu delay; they measure the orchestration overhead and do
-not predict Microsoft's network or workbook load time. Fresh-file live timing
-of this optimized automatic path remains unverified.
+not predict Microsoft's network or workbook load time. After restarting the
+final code, a fresh real Word file's automatic import connected in 1,472 ms,
+followed by a successful hidden paragraph read. This measures setup after the
+document loaded, excluding its earlier sign-in and initial page loading.
+
+Setup allows up to 15 seconds for Microsoft login redirects to complete before
+returning `SIGN_IN_REQUIRED`, within the existing overall setup deadline. It
+reports `waiting_for_sign_in` during this wait. Top-level navigation does not
+cancel the job while waiting for sign-in, selecting the account or waiting for
+the initial editor; navigation after editor binding retains cancellation.
+
+A recognized Microsoft account picker uses an account choice remembered for
+that document site and Electron profile, or an explicit `accountHint` email on
+`office_setup_bridge`. A passive listener remembers only the username on a
+trusted account-tile selection in an app-specific localStorage entry on the
+Microsoft login page, scoped by the document's origin. Synthetic events cannot
+set the preference. No password, token or cookie is stored by this feature.
+Account setup makes no calls to Teams' token provider or Graph and does not
+inspect Teams' authentication storage. The main Teams session supplies only
+the document view's existing Electron session, as it does for ordinary tabs.
+
+The fixed picker script matches the complete remembered identifier and refuses
+missing or multiple matches. No remembered choice returns
+`DOCUMENT_ACCOUNT_NOT_REMEMBERED`, allowing a first manual account choice or an
+explicit hint instead of guessing. One trusted Enter selects the matched tile
+through the bounded native input helper while preserving window visibility and
+native focus. Progress reports `selecting_account` and
+`accountSelection: dispatched`; dispatch alone is not proof of successful login.
+Password/OTP fields are checked for presence only, never read, filled or
+submitted. Unknown, credential or consent UI is left for the user. An uncertain
+selection is not automatically repeated. Account-picker selectors hot-reload
+from their fixed local module during source development, like the add-in probe.
+Older main-process builds are prevented from entering the removed token-lookup
+path by the updated probe until a restart loads the replacement handler.
+
+The inspection tool also works before Office loads, reporting only frame
+origins, persistent-session status and fixed cookie-state labels for ESTSAUTH,
+ESTSAUTHPERSISTENT, FedAuth and rtFa, plus bounded picker/credential-presence
+flags and a tile count. For the two SharePoint cookies it also reports up to
+eight attribute summaries: session or persistent, scope relative to the opened
+host (without domain names), Secure, HttpOnly, root-path and partition presence.
+Missing cookies have an empty list; unavailable inspection has no attributes.
+These explain why a cookie may be excluded from optional retention without
+changing that policy. Cookie values remain inside Electron.
+This does not promote session cookies or extend their expiry. A persistent
+partition alone does not make session cookies survive app termination;
+Microsoft's **Stay signed in** flow controls their normal persistence.
+
+`mcp.documentSession.enabled` separately opts into local persistence for secure,
+HttpOnly, root-path `FedAuth` (including numbered fragments) and `rtFa` cookies
+on exact SharePoint hosts opened in Documents, in that view's persistent
+Electron session. It also retains a domain-scoped `rtFa` on exactly
+`sharepoint.com` once a SharePoint document is opened in that session. This
+exception does not cover `FedAuth`, other cookie names or arbitrary parent
+domains; the same Secure, HttpOnly, root-path and nonpartitioned rules apply.
+It preserves the cookie value, scope, SameSite and security
+attributes and adds an expiry only to session cookies. Existing persistent
+cookie expiry is never extended. The default is off; retention defaults to
+seven days, with 1–30 accepted. Cookie values stay in Electron's normal store.
+The helper watches future cookie changes and scans existing cookies, rechecking
+the current value before promotion so stale scans cannot restore a removed or
+rotated token. Sign-out during a pending promotion removes only that exact
+promotion. Writes are flushed to disk; listeners are removed on close. It does
+not alter Microsoft login cookies, access Teams' token provider or change the
+server-side validity of SharePoint's signed session. Failures leave ordinary
+sign-in available without retrying or forwarding raw cookie-store errors.
+
+A real cold-restart test verified that both the site's `FedAuth` and the shared
+`rtFa` survived as persistent cookies with their scope and security flags
+preserved. The already-configured Word document reopened hidden, restored its
+Bridge in 4,483 ms and passed a paragraph read without account selection or
+interactive sign-in. This measures reopening an existing Bridge, not first-time
+import. Earlier retention of only `FedAuth` had still prompted for credentials:
+the exact-host filter excluded the parent-domain `rtFa`. Retaining that root
+cookie resolved the prompt in this test; server expiry and revocation still
+apply.
 
 A first real Word test reached a live Bridge and verified session-local
 paragraph IDs, paragraph reads, insertion, exact literal replacement and deleting

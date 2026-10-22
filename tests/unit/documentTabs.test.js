@@ -8,7 +8,7 @@ const path = require("node:path");
 const { startLocalEndpoint } = require("../../app/mcp/localEndpoint");
 const { withOfficeClient } = require("../../scripts/diagnoseOfficeMcp");
 
-function fixture(t) {
+function fixture(t, documentSession = null) {
   const contents = new Map(), windows = [], views = [], handlers = new Map();
   let nextId = 1;
   class Contents extends EventEmitter {
@@ -47,12 +47,22 @@ function fixture(t) {
   const inspector = { collect: () => ({ entries: [{ frame, metadata: { id: "7:8:9", webContentsId: otherAccount.id, surface: "document-wrapper" } }] }) };
   let documents = [];
   const bridge = { listDocuments: async () => ({ documents }) };
-  const tabs = new DocumentTabs({ getMainWindow: () => main, inspector, liveBridge: bridge, manifests: { excel: "excel manifest", word: "word manifest" }, electron });
+  const tabs = new DocumentTabs({ getMainWindow: () => main, inspector, liveBridge: bridge, manifests: { excel: "excel manifest", word: "word manifest" }, documentSession, electron });
   t.after(() => tabs.close());
   return { tabs, windows, views, main, otherAccount, app, handlers, frame, inspector, setDocuments: (value) => { documents = value; } };
 }
 
 describe("persistent document tabs", () => {
+  it("scopes optional sign-in persistence to the opened view's account and cleans up on quit", (t) => {
+    const watched = []; let closed = 0;
+    const { tabs, main, otherAccount } = fixture(t, { watch: (session, url) => watched.push({ session, url }), close: () => { closed++; } });
+    tabs.open({ url: "https://tenant.sharepoint.com/file.docx" });
+    tabs.open({ editorId: "7:8:9" });
+    assert.equal(watched[0].session, main.webContents.session);
+    assert.equal(watched[1].session, otherAccount.session);
+    assert.match(watched[0].url, /^https:\/\/tenant.sharepoint.com\//);
+    tabs.close(); assert.equal(closed, 1);
+  });
   it("accepts document links and prevents arbitrary/local destinations and navigation", () => {
     assert.equal(documentUrl("https://tenant.sharepoint.com/sites/files/book.xlsx"), "https://tenant.sharepoint.com/sites/files/book.xlsx?web=1");
     assert.match(documentUrl("https://tenant.sharepoint.com/:w:/r/sites/file.docx?e=secret"), /web=1/);
@@ -197,6 +207,27 @@ describe("persistent document tabs", () => {
     assert.equal(windows[0].visible, false);
   });
 
+  it("keeps automatic setup alive across a silent sign-in redirect", async (t) => {
+    const { tabs, views, setDocuments } = fixture(t);
+    const { tabId } = tabs.open({ url: "https://tenant.sharepoint.com/fresh.docx" });
+    const target = views[0].webContents;
+    target.mainFrame.framesInSubtree = [{ url: "https://login.microsoftonline.com/common/authorize" }];
+    await tabs.setupBridge(tabId);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal((await tabs.list()).tabs[0].bridgeSetup.stage, "waiting_for_sign_in");
+    target.emit("did-start-navigation", { isMainFrame: true });
+    setDocuments([{ id: "connected-document", webContentsId: target.id, application: "word" }]);
+    const until = Date.now() + 2000;
+    let result;
+    do {
+      result = (await tabs.list()).tabs[0];
+      if (result.bridgeSetup.status !== "running") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    } while (Date.now() < until);
+    assert.equal(result.bridgeSetup.status, "connected");
+    assert.equal(result.bridgeSetup.submitted, false);
+  });
+
   it("exposes background opening and tab/document state through the real MCP SDK", async (t) => {
     const { tabs } = fixture(t);
     const root = path.resolve(__dirname, "../../test-results/mcp");
@@ -212,8 +243,13 @@ describe("persistent document tabs", () => {
       assert.equal((await call("office_open_document", { url: "file:///etc/passwd" })).isError, true);
       assert.equal((await call("office_open_document", { url: "https://tenant.sharepoint.com/file.xlsx", script: "evil()" })).isError, true);
       const { tabId } = opened.structuredContent;
+      const inspection = await call("office_inspect_bridge_setup", { tabId });
+      assert.equal(inspection.structuredContent.application, null);
+      assert.equal(inspection.structuredContent.authentication.persistentSession, null);
+      assert.ok(Object.values(inspection.structuredContent.authentication.cookies).every((value) => value === "unavailable"));
       const started = await call("office_setup_bridge", { tabId });
       assert.equal(started.structuredContent.bridgeSetup.status, "running");
+      assert.equal((await call("office_setup_bridge", { tabId, accountHint: "not-an-email" })).isError, true);
       assert.equal((await call("office_setup_bridge", { tabId, manifestPath: "/etc/passwd" })).isError, true);
       assert.equal((await call("office_setup_bridge", { tabId, script: "evil()" })).isError, true);
       assert.equal((await call("office_setup_bridge", { tabId, selector: "input" })).isError, true);

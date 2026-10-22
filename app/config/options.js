@@ -29,13 +29,21 @@ const defaults = require("./defaults");
 
 module.exports = {
       mcp: {
-        default: { enabled: false, files: { enabled: false }, codemirror: { enabled: false }, addin: { enabled: false, port: 39847 } },
+        default: { enabled: false, files: { enabled: false }, codemirror: { enabled: false }, addin: { enabled: false, port: 39847 }, documentSession: { enabled: false, days: 7 } },
         describe: "Local MCP access to Office diagnostics, an optional Excel/Word add-in bridge and optional channel file reads and writes. Requires restart.",
         type: "object",
         fields: {
           enabled: {
             type: "boolean",
             describe: "Expose MCP tools over a private Unix socket for local agents. Enable addin.enabled for live Excel/Word tools and files.enabled for channel file reads and writes.",
+          },
+          "documentSession.enabled": {
+            type: "boolean",
+            describe: "Opt in to retaining SharePoint document sign-in across app restarts. Adds a local expiry to session-only FedAuth/rtFa cookies (including numbered FedAuth fragments) for exact SharePoint sites opened in Documents, plus the shared sharepoint.com rtFa root cookie. Leaves Microsoft login cookies and unrelated site cookies unchanged. Cookies remain in Electron's normal store; Microsoft can still expire or revoke the session and require sign-in/MFA. Off by default; requires restart.",
+          },
+          "documentSession.days": {
+            type: "number",
+            describe: "Local retention in days for document-session cookies, from 1 to 30; invalid values use 7. Does not extend Microsoft's server-side session validity.",
           },
           "codemirror.enabled": {
             type: "boolean",

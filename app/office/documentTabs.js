@@ -68,6 +68,7 @@ class DocumentTabs {
   #inspector;
   #bridge;
   #manifests;
+  #documentSession;
   #window = null;
   #tabs = new Map();
   #selected = null;
@@ -77,12 +78,13 @@ class DocumentTabs {
   #showListener;
   #quitListener;
 
-  constructor({ getMainWindow, inspector, liveBridge = null, manifests = null, electron = require("electron") }) {
+  constructor({ getMainWindow, inspector, liveBridge = null, manifests = null, documentSession = null, electron = require("electron") }) {
     this.#electron = electron;
     this.#getMainWindow = getMainWindow;
     this.#inspector = inspector;
     this.#bridge = liveBridge;
     this.#manifests = manifests;
+    this.#documentSession = documentSession;
     this.#showListener = () => { try { this.show(); } catch { /* App is closing. */ } };
     this.#quitListener = () => this.close();
     electron.app.on("office-documents-show", this.#showListener);
@@ -206,6 +208,7 @@ class DocumentTabs {
     if (!this.#selected || foreground) this.#selected = tab.id;
     const target = view.webContents;
     const origin = new URL(link).origin;
+    this.#documentSession?.watch(contents.session, link);
     target.setAudioMuted(true);
     target.setWindowOpenHandler(() => { tab.blockedNavigation = true; this.#publish(); return { action: "deny" }; });
     const guard = (event, nextUrl) => {
@@ -221,7 +224,7 @@ class DocumentTabs {
     target.on("did-finish-load", () => { tab.status = "loaded"; this.#publish(); });
     target.on("render-process-gone", () => { tab.status = "crashed"; this.#forgetDocuments(target.id); this.#publish(); });
     target.on("did-start-navigation", (event, _url, _inPlace, isMainFrame) => {
-      if ((event.isMainFrame ?? isMainFrame) && tab.bridgeSetup?.stage !== "waiting_for_editor") tab.setupController?.abort();
+      if ((event.isMainFrame ?? isMainFrame) && !["waiting_for_editor", "waiting_for_sign_in", "selecting_account"].includes(tab.bridgeSetup?.stage)) tab.setupController?.abort();
     });
     target.once("destroyed", () => {
       tab.setupController?.abort();
@@ -246,8 +249,13 @@ class DocumentTabs {
     const tab = this.#tabs.get(tabId);
     if (!tab || this.#closed || tab.view.webContents.isDestroyed()) throw new Error("Document tab is no longer available. List tabs again.");
     const { inspectBridgeSetup } = require("./bridgeSetup");
+    const { inspectDocumentAuthentication } = require("./documentAuthentication");
+    const { inspectDocumentAccount } = require("./documentAccount");
+    const authentication = await inspectDocumentAuthentication(tab.view.webContents.session, tab.url);
     return { tabId, window: { visible: this.#window.isVisible(), minimized: this.#window.isMinimized(),
       focused: this.#window.isFocused?.() === true, selected: this.#selected === tabId },
+    authentication,
+    accountPicker: await inspectDocumentAccount(tab.view.webContents, new URL(tab.url).origin),
     ...(await inspectBridgeSetup(tab.view.webContents)) };
   }
 
@@ -274,7 +282,7 @@ class DocumentTabs {
     } finally { tab.setupPromise = null; }
   }
 
-  async setupBridge(tabId, retry = false) {
+  async setupBridge(tabId, retry = false, accountHint) {
     const tab = this.#tabs.get(tabId);
     if (!tab || this.#closed) throw new Error("Document tab is no longer available. List tabs again.");
     if (!this.#bridge || !this.#manifests) throw new Error("Bridge setup is unavailable. Enable the Office Bridge and restart Teams.");
@@ -289,7 +297,11 @@ class DocumentTabs {
     // Return immediately; callers poll office_list_tabs while Office loads its
     // menus and manifest. Repeated calls reuse this job instead of uploading twice.
     tab.setupPromise = Promise.resolve().then(() => runBridgeSetup({
-      contents: tab.view.webContents, manifests: this.#manifests, signal: controller.signal,
+      contents: tab.view.webContents, manifests: this.#manifests, signal: controller.signal, accountScope: new URL(tab.url).origin,
+      getAccount: () => {
+        const { getRememberedDocumentAccount } = require("./documentAccount");
+        return getRememberedDocumentAccount(tab.view.webContents, new URL(tab.url).origin, accountHint);
+      },
       listDocuments: async () => { await this.list(); return { documents: this.#documents }; }, update,
     })).then(update).catch(() => update({ status: "needs_attention", stage: "stopped", code: "SETUP_UI_UNAVAILABLE" })).finally(() => { tab.setupPromise = null; });
     this.#publish();
@@ -327,6 +339,7 @@ class DocumentTabs {
   close() {
     if (this.#closed) return;
     this.#closed = true;
+    this.#documentSession?.close();
     this.#electron.app.removeListener("office-documents-show", this.#showListener);
     this.#electron.app.removeListener("before-quit", this.#quitListener);
     this.#electron.ipcMain.removeHandler("office-tabs");

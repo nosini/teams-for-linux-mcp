@@ -18,6 +18,14 @@ function fixture(t) {
 }
 
 describe("fixed Office UI probe development reload", () => {
+  it("reloads a fixed named export for the account picker", (t) => {
+    const { filename, write } = fixture(t);
+    write("exports.documentAccountUi = function() { return 'one'; };");
+    const script = createBridgeSetupUiLoader({ filename, exportName: "documentAccountUi", development: true });
+    assert.equal(vm.runInNewContext(script({})), "one");
+    write("exports.documentAccountUi = function() { return 'two'; };");
+    assert.equal(vm.runInNewContext(script({})), "two");
+  });
   it("reloads a changed fixed module in development without accepting request source", (t) => {
     const { filename, write } = fixture(t);
     const script = createBridgeSetupUiLoader({ filename, development: true });

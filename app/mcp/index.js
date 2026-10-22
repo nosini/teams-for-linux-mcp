@@ -39,7 +39,9 @@ class OfficeMcp {
       if (this.#closed) return;
       if (this.#getMainWindow()) {
         const { DocumentTabs } = require("../office/documentTabs");
-        this.#documentTabs = new DocumentTabs({ getMainWindow: this.#getMainWindow, inspector, liveBridge, manifests: this.#addinHost?.manifests });
+        const { RememberDocumentSession } = require("../office/rememberDocumentSession");
+        const documentSession = mcp.documentSession?.enabled === true ? new RememberDocumentSession(mcp.documentSession) : null;
+        this.#documentTabs = new DocumentTabs({ getMainWindow: this.#getMainWindow, inspector, liveBridge, manifests: this.#addinHost?.manifests, documentSession });
       }
       let channelFiles = null;
       if (mcp.files?.enabled === true) {

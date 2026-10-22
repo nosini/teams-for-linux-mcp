@@ -2,12 +2,12 @@ const fs = require("node:fs");
 
 // Only the fixed, locally installed UI module can reload. No MCP request can
 // supply a path or source. Packaged builds keep the normal immutable module.
-function createBridgeSetupUiLoader({ development = process.defaultApp === true, filename = require.resolve("./bridgeSetupUi") } = {}) {
+function createBridgeSetupUiLoader({ development = process.defaultApp === true, filename = require.resolve("./bridgeSetupUi"), exportName = "bridgeSetupUi" } = {}) {
   const stamp = () => {
     const stat = fs.statSync(filename, { bigint: true });
     return `${stat.dev}:${stat.ino}:${stat.mtimeNs}:${stat.size}`;
   };
-  let current = require(filename).bridgeSetupUi;
+  let current = require(filename)[exportName];
   let revision = development ? stamp() : null;
   return (request) => {
     if (development) {
@@ -16,7 +16,7 @@ function createBridgeSetupUiLoader({ development = process.defaultApp === true, 
         const previous = require.cache[filename];
         delete require.cache[filename];
         try {
-          const next = require(filename).bridgeSetupUi;
+          const next = require(filename)[exportName];
           if (typeof next !== "function") throw new Error("Invalid UI module");
           current = next;
           revision = nextRevision;

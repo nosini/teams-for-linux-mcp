@@ -36,11 +36,9 @@ In a Documents tab, choose **Connect Bridge** to import the matching add-in
 through Office's menus. Agents can do the same with `office_setup_bridge` while
 the window stays hidden. This uses the app's own manifest; it does not need
 admin deployment when your organization already allows manual add-in uploads.
-The automation recognizes English and Dutch add-in controls. If setup stops,
-finish sign-in or use the manual steps below. The first live Microsoft import
-test loaded Excel after sign-in, but stopped after selecting Insert because the
-add-in controls were not recognized. No upload was attempted. Automatic import
-is not yet verified against that UI; the passing tests use a simulated UI.
+The automation recognizes English and Dutch add-in controls. First-time imports
+and hidden document operations have been verified in real Excel and Word.
+If setup stops, finish sign-in or use the manual steps below.
 
 Open a document using **Edit in Teams**. In Office's **Add-ins** menu, choose
 **Upload My Add-in** and select the manifest printed at startup:
@@ -72,6 +70,60 @@ in each tab, and wait for the window to say **Bridge connected**. A page being
 loaded does not establish agent access. Opening a URL alone does not install
 the add-in. The setup operation imports it through Office's UI without showing
 the tab. Tenant restrictions still apply, and sign-in may need your interaction.
+
+Document tabs share the originating Teams account's browser session. Setup
+waits up to 15 seconds on Microsoft's sign-in page for an automatic redirect
+before reporting `SIGN_IN_REQUIRED`; it keeps the window hidden during this
+wait. A temporary visit to a sign-in URL does not itself mean you logged out.
+If Microsoft displays its account picker, setup can select the document account
+previously chosen for this site and browser profile while keeping the window
+hidden. Choose your account once manually, or have the agent supply an explicit
+`accountHint` email to `office_setup_bridge`. Only the selected username is
+remembered locally; passwords, tokens and cookie expiry are not changed. No
+identity request is made through the main Teams session. Setup stops if no
+account is remembered, no tile matches, or several tiles match. Account
+selection runs at most once per setup attempt. Passwords, MFA and consent
+prompts still require you. Microsoft controls whether the resulting login is
+accepted and how long it remains valid.
+If Microsoft offers **Stay signed in**, choosing it allows Microsoft to issue
+persistent cookies that survive an app restart, subject to your organization's
+session policies. Using the same launch/profile each time also matters;
+source and packaged launches can have different browser storage.
+
+For a repeated prompt, `office_inspect_bridge_setup` reports whether that tab's
+Electron session is persistent and whether the known Microsoft/SharePoint
+sign-in cookies are missing, session-only or persistent. It works before Word
+or Excel loads, and does not return cookie values or account identifiers.
+It also reports whether a recognized account picker or credential fields are
+present, without returning field values or account names.
+These diagnostics do not establish that Microsoft will still accept a cookie.
+
+If SharePoint's sign-in cookies disappear on every restart and Microsoft offers
+no **Stay signed in** option, the app has a separate opt-in setting:
+
+```json
+{
+  "mcp": {
+    "enabled": true,
+    "addin": { "enabled": true },
+    "documentSession": { "enabled": true, "days": 7 }
+  }
+}
+```
+
+After restarting with this setting, open the document and finish sign-in once.
+The app gives session-only `FedAuth` and `rtFa` cookies for that exact SharePoint
+site, plus the shared `sharepoint.com` `rtFa` root cookie, a local expiry so
+Electron can retain them across restarts. This also covers numbered `FedAuth`
+fragments. The root cookie keeps its existing shared scope; other site cookies
+remain limited to exact opened hosts. It retains the sign-in cookies on disk for
+up to seven days by default; choose 1–30 days. Passwords and cookie values are
+never copied to app settings, diagnostics or repository files. Microsoft login
+cookies, unrelated site cookies and cookies with an existing expiry are left unchanged.
+Explicit sign-out still removes the cookies. Microsoft's server-side expiry,
+revocation and MFA requirements still apply, so this cannot guarantee that
+every subsequent open will be silent. Turning the setting off stops further
+promotions; sign out of the site to remove cookies already retained.
 
 Use **Hide window**, or close the Documents window, to keep working in Teams
 while the agent edits. Both actions keep all tabs running. To unload a document,

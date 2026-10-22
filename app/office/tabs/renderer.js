@@ -35,7 +35,7 @@ function render(state) {
   status.textContent = !state.bridgeAvailable ? "Live Office access is unavailable in this run. Enable the Office Bridge and restart Teams to let agents edit." :
     !tab ? "Open a file here. Closing this window keeps your tabs running." :
     tab.connected ? "Bridge connected. Agents can edit this document while this window is hidden." :
-    tab.bridgeSetup?.status === "running" ? "Connecting the Bridge through Office’s add-in menu…" :
+    tab.bridgeSetup?.status === "running" ? (["waiting_for_sign_in", "selecting_account"].includes(tab.bridgeSetup.stage) ? "Signing in with your remembered document account…" : "Connecting the Bridge through Office’s add-in menu…") :
     tab.bridgeSetup?.code ? `Bridge setup stopped (${tab.bridgeSetup.code}). Check Office’s add-in menu or sign-in before trying again.` :
     tab.blockedNavigation ? "This document requested another page or sign-in window. Open it visibly to finish setup; external navigation is blocked." :
     tab.status === "loading" ? "Opening document…" : tab.status === "failed" || tab.status === "crashed" ? "The document could not load. Close this tab and reopen the file." :
