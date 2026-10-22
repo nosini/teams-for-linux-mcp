@@ -8,12 +8,12 @@ const folder = "/sites/team/Shared Documents/Work";
 const fileId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const folderUrl = web + "/Shared%20Documents/Forms/AllItems.aspx?id=" + encodeURIComponent(folder);
 const documentUrl = web + "/_layouts/15/Doc.aspx?sourcedoc=%7B" + fileId + "%7D&private=secret";
-const file = (name) => ({ Name: name, ServerRelativeUrl: folder + "/" + name, UniqueId: fileId, private: "private-token" });
+const file = (name, parent = folder) => ({ Name: name, ServerRelativeUrl: parent + "/" + name, UniqueId: fileId, private: "private-token" });
 
 function fixture(urls = [folderUrl]) {
   const calls = [], frames = urls.map((url) => ({ url, executeJavaScript: async () => ({ webUrl: web }) }));
   const contents = { id: 1, isDestroyed: () => false, mainFrame: { framesInSubtree: frames } };
-  const state = { files: [], onRequest: null, pageWeb: web };
+  const state = { files: [], folders: [], onRequest: null, pageWeb: web };
   for (const frame of frames) frame.executeJavaScript = async (script) => vm.runInNewContext(script, {
     location: new URL(frame.url), URL, Date, _spPageContextInfo: { webAbsoluteUrl: state.pageWeb },
     fetch: (url, options) => contents.session.fetch(url, options), AbortController, Uint8Array, TextDecoder, atob, setTimeout, clearTimeout,
@@ -22,14 +22,16 @@ function fixture(urls = [folderUrl]) {
     calls.push({ url, options });
     if (state.onRequest) { const response = await state.onRequest(url, options); if (response) return response; }
     const path = decodeURIComponent(new URL(url).pathname);
+    const parent = path.match(/GetFolderByServerRelativePath\(decodedurl='((?:''|[^'])*)'\)/)?.[1].replace(/''/g, "'") || folder;
     if (path.endsWith("/contextinfo")) return Response.json({ GetContextWebInformation: { FormDigestValue: "private-digest" } });
     if (path.includes("/Files/AddUsingPath")) {
       const name = path.match(/AddUsingPath\(decodedurl='(.*)',overwrite=false\)/)[1].replace(/''/g, "'");
-      const created = file(name); state.files.push(created); return Response.json(created);
+      const created = file(name, parent); state.files.push(created); return Response.json(created);
     }
-    if (path.endsWith("/Files")) return Response.json({ value: state.files });
+    if (path.endsWith("/Files")) return Response.json({ value: state.files.filter((item) => item.ServerRelativeUrl.slice(0, item.ServerRelativeUrl.lastIndexOf("/")) === parent) });
+    if (path.endsWith("/Folders")) return Response.json({ value: state.folders });
     if (path.includes("GetFileBy")) return Response.json(file("Existing.docx"));
-    return Response.json({ Name: "Work", ServerRelativeUrl: folder, UniqueId: fileId });
+    return Response.json({ Name: parent.split("/").at(-1), ServerRelativeUrl: parent, UniqueId: fileId });
   } };
   const locations = new DocumentLocations(() => [contents]);
   return { locations, contents, frames, calls, state };
@@ -83,6 +85,104 @@ describe("document folder discovery and creation", () => {
     assert.doesNotMatch(JSON.stringify(created.item), /digest|private|token/);
     assert.equal((await f.locations.listFiles(created.locationId, created.item.name)).files[0].name, created.item.name);
     assert.match(f.calls.at(-1).url, /\$filter=Name%20eq%20/);
+  });
+
+  it("verifies a sibling destination without navigation and preserves the current-folder default", async (t) => {
+    const f = fixture(); t.after(() => f.locations.close());
+    const source = (await f.locations.list()).locations[0];
+    const target = "/sites/team/Shared Documents/Reports #1% O'Brien";
+    const resolved = (await f.locations.resolve({ sourceLocationId: source.locationId, folderPath: target })).location;
+    assert.equal(resolved.folderPath, target);
+    assert.equal(resolved.webUrl, web);
+    assert.equal(resolved.source, "explicit_folder");
+    assert.equal(f.frames[0].url, folderUrl);
+    assert.ok(f.calls.every(({ options }) => options.method === "GET"));
+    assert.match(f.calls.at(-1).url, /Reports%20%231%25%20O%27%27Brien/);
+    const created = await f.locations.create(resolved.locationId, "Sibling draft");
+    assert.equal(decodeURIComponent(new URL(created.item.url).pathname), target + "/Sibling draft.docx");
+    assert.equal(created.contents, f.contents);
+    assert.equal((await f.locations.listFiles(resolved.locationId)).files[0].name, created.item.name);
+    const current = await f.locations.create(undefined, "Current draft");
+    assert.equal(decodeURIComponent(new URL(current.item.url).pathname), folder + "/Current draft.docx");
+  });
+
+  it("browses child destinations with usable location IDs and marks incomplete listings", async (t) => {
+    const f = fixture(); t.after(() => f.locations.close());
+    const source = (await f.locations.list()).locations[0];
+    f.state.folders = [file("Child", folder)];
+    const children = await f.locations.listFolders(source.locationId);
+    assert.equal(children.truncated, false);
+    assert.equal(children.folders[0].folderPath, folder + "/Child");
+    assert.equal(children.folders[0].webContentsId, f.contents.id);
+    const created = await f.locations.create(children.folders[0].locationId, "Child draft");
+    assert.equal(decodeURIComponent(new URL(created.item.url).pathname), folder + "/Child/Child draft.docx");
+    f.state.onRequest = async (url) => new URL(url).pathname.endsWith("/Folders") ?
+      Response.json({ value: f.state.folders, "@odata.nextLink": "https://private.test/?secret=token" }) : null;
+    const partial = await f.locations.listFolders(source.locationId);
+    assert.equal(partial.truncated, true);
+    assert.doesNotMatch(JSON.stringify(partial), /private|secret|token/);
+    f.state.onRequest = null;
+    f.state.folders = [file("Elsewhere", "/sites/other/Documents")];
+    await assert.rejects(f.locations.listFolders(source.locationId), /INVALID_SHAREPOINT_RESPONSE/);
+  });
+
+  it("uses an explicit owning site/subsite on the same origin while retaining the source account", async (t) => {
+    const f = fixture(); t.after(() => f.locations.close());
+    const source = (await f.locations.list()).locations[0];
+    const otherWeb = origin + "/sites/other/subsite", target = "/sites/other/subsite/Documents/Reports";
+    const resolved = (await f.locations.resolve({ sourceLocationId: source.locationId, folderPath: target, webUrl: otherWeb })).location;
+    assert.equal(resolved.webUrl, otherWeb);
+    assert.equal(resolved.origin, origin);
+    const created = await f.locations.create(resolved.locationId, "Other site draft");
+    assert.equal(created.contents, f.contents);
+    assert.equal(decodeURIComponent(new URL(created.item.url).pathname), target + "/Other site draft.docx");
+    assert.ok(f.calls.slice(1).every(({ url }) => url.startsWith(otherWeb + "/_api/")));
+    assert.equal(f.frames[0].url, folderUrl);
+    assert.equal((await f.locations.list()).locations[0].folderPath, folder);
+  });
+
+  it("rejects invalid destination paths and origins before issuing requests", async (t) => {
+    const f = fixture(); t.after(() => f.locations.close());
+    const source = (await f.locations.list()).locations[0];
+    const requests = f.calls.length;
+    for (const folderPath of ["../Reports", "//private.test/Reports", "https://private.test/Reports", "/sites/team/../other", "/sites/team/./Reports", "/sites/team/\\Reports", "/sites/team/\u0000Reports", "/" + "a".repeat(4096)])
+      await assert.rejects(f.locations.resolve({ sourceLocationId: source.locationId, folderPath }), /folderPath/);
+    for (const webUrl of ["http://tenant.sharepoint.com/sites/team", "https://other.sharepoint.com/sites/team", "https://private.test/sites/team", "https://user:password@tenant.sharepoint.com/sites/team", web + "?secret=token", web + "#fragment", origin + ":8443/sites/team", web + "/_api/web", web + "/_layouts/15"])
+      await assert.rejects(f.locations.resolve({ sourceLocationId: source.locationId, folderPath: folder, webUrl }), (error) => {
+        assert.match(error.message, /webUrl/); assert.doesNotMatch(error.message, /password|private|secret|token|fragment/); return true;
+      });
+    await assert.rejects(f.locations.resolve({ sourceLocationId: source.locationId, folderPath: "/sites/other/Documents" }), /owning site/);
+    assert.equal(f.calls.length, requests);
+  });
+
+  it("fails closed on denied, missing or mismatched destinations without uploading a file", async (t) => {
+    const f = fixture(); t.after(() => f.locations.close());
+    const source = (await f.locations.list()).locations[0];
+    for (const status of [403, 404]) {
+      f.state.onRequest = async () => new Response("private-server-body", { status });
+      await assert.rejects(f.locations.resolve({ sourceLocationId: source.locationId, folderPath: folder + "/Missing" }),
+        { message: status === 403 ? "SHAREPOINT_ACCESS_DENIED" : "SHAREPOINT_NOT_FOUND" });
+    }
+    f.state.onRequest = async () => Response.json({ Name: "Missing", ServerRelativeUrl: folder + "/Missing", Exists: false });
+    await assert.rejects(f.locations.resolve({ sourceLocationId: source.locationId, folderPath: folder + "/Missing" }), /SHAREPOINT_NOT_FOUND/);
+    f.state.onRequest = async () => Response.json({ Name: "Wrong", ServerRelativeUrl: folder + "/Wrong" });
+    await assert.rejects(f.locations.resolve({ sourceLocationId: source.locationId, folderPath: folder + "/Missing" }), /INVALID_SHAREPOINT_RESPONSE/);
+    assert.equal(f.calls.filter(({ options }) => options.method === "POST").length, 0);
+  });
+
+  it("expires resolved destinations with their original source and rejects navigation during verification", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"] });
+    const f = fixture(); t.after(() => f.locations.close());
+    const source = (await f.locations.list()).locations[0];
+    t.mock.timers.tick(4 * 60 * 1000);
+    const resolved = (await f.locations.resolve({ sourceLocationId: source.locationId, folderPath: folder + "/Reports" })).location;
+    t.mock.timers.tick(60 * 1000);
+    await assert.rejects(f.locations.create(resolved.locationId, "Expired"), /LOCATION_CHANGED/);
+    await assert.rejects(f.locations.listFolders(resolved.locationId), /LOCATION_CHANGED/);
+    const fresh = (await f.locations.list()).locations[0];
+    f.state.onRequest = async () => { f.frames[0].url = "https://teams.cloud.microsoft/"; };
+    await assert.rejects(f.locations.resolve({ sourceLocationId: fresh.locationId, folderPath: folder + "/Reports" }), /LOCATION_CHANGED/);
+    assert.equal(f.calls.filter(({ options }) => options.method === "POST").length, 0);
   });
 
   it("requires a folder choice for ambiguous contexts and binds it to its original view", async (t) => {

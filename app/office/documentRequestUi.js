@@ -1,6 +1,6 @@
 // App-owned SharePoint REST transport. Requests execute in the originating
 // browser frame so its normal request context and credentials apply. No MCP
-// caller supplies URLs, headers, JavaScript or document bytes to this function.
+// caller supplies REST endpoints, headers, JavaScript or document bytes.
 async function documentRequestUi(request) {
   if (location.href !== request.pageUrl || Date.now() >= request.deadline) return { code: "LOCATION_CHANGED" };
   let url, web;

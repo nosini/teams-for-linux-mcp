@@ -95,6 +95,7 @@ class DocumentLocations {
       if (response.status < 200 || response.status >= 300) {
         if (response.status >= 300 && response.status < 400 || response.status === 401) throw new Error("SIGN_IN_REQUIRED");
         if (response.status === 403) throw new Error("SHAREPOINT_ACCESS_DENIED");
+        if (response.status === 404) throw new Error("SHAREPOINT_NOT_FOUND");
         if (response.status === 409) throw new Error("DOCUMENT_NAME_EXISTS. List the folder before choosing another name.");
         throw new Error(writing && response.status >= 500 ? "CREATION_OUTCOME_UNKNOWN" : "SHAREPOINT_REQUEST_FAILED");
       }
@@ -103,7 +104,7 @@ class DocumentLocations {
       catch { throw new Error(writing ? "CREATION_OUTCOME_UNKNOWN" : "SIGN_IN_REQUIRED"); }
       return data.d || data;
     } catch (error) {
-      const allowed = ["SIGN_IN_REQUIRED", "SHAREPOINT_ACCESS_DENIED", "DOCUMENT_NAME_EXISTS", "CREATION_OUTCOME_UNKNOWN", "SHAREPOINT_REQUEST_FAILED", "SHAREPOINT_RESPONSE_TOO_LARGE"];
+      const allowed = ["SIGN_IN_REQUIRED", "SHAREPOINT_ACCESS_DENIED", "SHAREPOINT_NOT_FOUND", "DOCUMENT_NAME_EXISTS", "CREATION_OUTCOME_UNKNOWN", "SHAREPOINT_REQUEST_FAILED", "SHAREPOINT_RESPONSE_TOO_LARGE"];
       const code = allowed.find((value) => error.message?.startsWith(value));
       // eslint-disable-next-line preserve-caught-error -- Causes may contain credentials or server text.
       if (code) throw new Error(code + (writing ? ". Do not retry creation automatically; use office_list_location_files to inspect the destination." : ""));
@@ -114,6 +115,17 @@ class DocumentLocations {
   }
 
   #folderEndpoint(path) { return "web/GetFolderByServerRelativePath(decodedurl=" + literal(path) + ")"; }
+
+  #remember(candidate, folderPath, folder, source) {
+    for (const [key, value] of this.#locations) if (!this.#current(value)) this.#locations.delete(key);
+    if (serverPath(folder.ServerRelativeUrl) !== folderPath || folder.Exists === false || !this.#current(candidate)) throw new Error("LOCATION_CHANGED. Resolve the folder again.");
+    const existing = [...this.#locations.values()].find((location) => location.contents === candidate.contents && location.frame === candidate.frame &&
+      location.frameUrl === candidate.frameUrl && location.webUrl === candidate.webUrl && location.folderPath === folderPath);
+    const locationId = existing?.locationId || randomUUID();
+    const location = { ...candidate, source, folderPath, locationId, name: String(folder.Name || folderPath.split("/").at(-1)).slice(0, 255) };
+    this.#locations.set(locationId, location);
+    return { locationId, name: location.name, origin: location.origin, webUrl: location.webUrl, folderPath, source, webContentsId: location.contents.id };
+  }
 
   async list() {
     for (const [key, value] of this.#locations) if (!this.#current(value)) this.#locations.delete(key);
@@ -153,14 +165,11 @@ class DocumentLocations {
             if (!serverPath(path) || webPath && !path.startsWith(webPath + "/")) throw new Error("INVALID_LOCATION");
             const folder = await this.#json(candidate, this.#folderEndpoint(path) + "?$select=" + fields);
             if (serverPath(folder.ServerRelativeUrl) !== path || !this.#current(candidate)) throw new Error("INVALID_LOCATION");
-            const existing = [...this.#locations.values()].find((location) => location.contents === contents && location.frame === frame && location.frameUrl === frameUrl && location.folderPath === path);
-            const locationId = existing?.locationId || randomUUID();
             const sourceKind = source.source === "sharepoint_view" ? "folder" : source.source;
-            const location = { ...candidate, source: sourceKind, folderPath: path, locationId, name: String(folder.Name || path.split("/").at(-1)).slice(0, 255) };
-            this.#locations.set(locationId, location);
+            const location = this.#remember(candidate, path, folder, sourceKind);
             if (seen.some((item) => item.session === contents.session && item.origin === candidate.origin && item.path === path)) continue;
             seen.push({ session: contents.session, origin: candidate.origin, path });
-            result.push({ locationId, name: location.name, origin: location.origin, folderPath: path, source: location.source, webContentsId: contents.id });
+            result.push(location);
           } catch (error) {
             const code = ["SIGN_IN_REQUIRED", "SHAREPOINT_ACCESS_DENIED", "SHAREPOINT_REQUEST_UNAVAILABLE", "FOLDER_NOT_IDENTIFIED"].includes(error.message) ? error.message : "LOCATION_UNAVAILABLE";
             const kinds = ["allitems", "listallitems", "onedrive", "doclibembed", "filebrowser", "teamslogon", "doc", "wopiframe", "other"];
@@ -187,6 +196,39 @@ class DocumentLocations {
     const location = this.#locations.get(locationId);
     if (!location || !this.#current(location)) throw new Error("LOCATION_CHANGED. Call office_list_locations again.");
     return location;
+  }
+
+  async resolve({ sourceLocationId, folderPath, webUrl }) {
+    const path = serverPath(folderPath);
+    if (!path) throw new Error("Use a decoded, server-relative SharePoint folderPath starting with / and without traversal segments.");
+    const source = await this.#resolve(sourceLocationId);
+    let web;
+    try {
+      web = new URL(webUrl === undefined ? source.webUrl : webUrl);
+      if (web.protocol !== "https:" || web.origin !== source.origin || web.username || web.password || web.port || web.search || web.hash ||
+        !serverPath(decodeURIComponent(web.pathname)) || /\/(?:_api|_layouts)(?:\/|$)/i.test(decodeURIComponent(web.pathname))) throw new Error("invalid");
+    } catch { throw new Error("Use an owning site/subsite webUrl on the source location's SharePoint origin, without query parameters or credentials."); }
+    const webPath = decodeURIComponent(web.pathname).replace(/\/$/, "");
+    if (webPath && path !== webPath && !path.startsWith(webPath + "/")) throw new Error("The folderPath must belong to webUrl. Supply the owning site/subsite webUrl for another site.");
+    const candidate = { ...source, webUrl: web.href.replace(/\/$/, "") };
+    const folder = await this.#json(candidate, this.#folderEndpoint(path) + "?$select=" + fields + ",Exists");
+    if (folder.Exists === false) throw new Error("SHAREPOINT_NOT_FOUND");
+    if (serverPath(folder.ServerRelativeUrl) !== path) throw new Error("INVALID_SHAREPOINT_RESPONSE");
+    return { location: this.#remember(candidate, path, folder, "explicit_folder") };
+  }
+
+  async listFolders(locationId) {
+    const location = await this.#resolve(locationId);
+    const data = await this.#json(location, this.#folderEndpoint(location.folderPath) + "/Folders?$select=" + fields + "&$top=50");
+    const values = data.value || data.results;
+    if (!Array.isArray(values) || !this.#current(location)) throw new Error("LOCATION_CHANGED. Resolve the folder again.");
+    // Validate the complete page before registering any of its destinations.
+    const folders = values.slice(0, 50).map((folder) => {
+      fileMetadata(folder, location.origin, location.folderPath);
+      return folder;
+    });
+    return { locationId: location.locationId, folders: folders.map((folder) => this.#remember(location, folder.ServerRelativeUrl, folder, "explicit_folder")),
+      truncated: values.length > 50 || !!data["@odata.nextLink"] || !!data["odata.nextLink"] || !!data.__next };
   }
 
   async listFiles(locationId, name) {

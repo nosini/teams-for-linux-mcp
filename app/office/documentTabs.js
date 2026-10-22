@@ -252,6 +252,10 @@ class DocumentTabs {
 
   listLocations() { return this.#locations.list(); }
 
+  resolveLocation(args) { return this.#locations.resolve(args); }
+
+  listLocationFolders(locationId) { return this.#locations.listFolders(locationId); }
+
   listLocationFiles(locationId, name) { return this.#locations.listFiles(locationId, name); }
 
   async createDocument({ locationId, name }) {

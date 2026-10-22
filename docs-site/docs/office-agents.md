@@ -55,7 +55,7 @@ client's trust for the local HTTPS certificate and may show an add-in startup
 error. Other editors can close that pane and coauthor normally in their browser;
 they do not need the bridge installed or working there.
 
-## Create a document in the current folder
+## Create a document in a SharePoint folder
 
 An agent can create a blank Word document without asking for a file link. Open
 the destination folder in Teams, or open a Word/Excel document already in that
@@ -67,6 +67,20 @@ a name and the selected `locationId`. The app adds `.docx` if needed, creates
 the file, opens it hidden in the originating account and starts Bridge setup.
 The agent checks `office_list_tabs`, lists the connected document and reads
 before editing. No pasted link or agent-generated Office package is needed.
+
+The destination can also be another existing folder without navigating Teams.
+The agent uses `office_list_location_folders` to browse child folders, whose
+returned `locationId` values work directly for creation. For a known path, it
+calls `office_resolve_location` with a `sourceLocationId` to select the signed-in
+account and a decoded `folderPath`, such as `/sites/team/Documents/Reports`.
+The source location's `webUrl` is used by default. For another site or subsite
+on the same SharePoint host, the agent supplies that site's owning `webUrl`.
+The app verifies the folder before returning a destination `locationId`.
+Folders on another SharePoint host need a source location on that host.
+These tools read metadata and do not create missing folders.
+Resolving the parent library, browsing its children, creating in a sibling
+folder, importing the Bridge and verifying an edit have also passed in a live
+session with the document window hidden throughout.
 
 If several destinations are available, the agent must select the one matching
 your request. It can omit `locationId` only when exactly one folder is available.

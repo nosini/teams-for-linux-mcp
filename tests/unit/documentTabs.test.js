@@ -66,16 +66,23 @@ describe("persistent document tabs", () => {
     let uploads = 0;
     main.webContents.session.fetch = () => assert.fail("Do not use the main account");
     otherAccount.session.fetch = async (url, options) => {
+      const pathname = decodeURIComponent(new URL(url).pathname);
+      const parent = pathname.match(/GetFolderByServerRelativePath\(decodedurl='(.*?)'\)/)?.[1] || folder;
+      if (pathname.endsWith("/Folders")) return Response.json({ value: [{ Name: "Child", ServerRelativeUrl: parent + "/Child" }] });
       if (url.includes("contextinfo")) return Response.json({ FormDigestValue: "private-digest" });
       if (options.body) {
         uploads++;
         const name = decodeURIComponent(new URL(url).pathname).match(/AddUsingPath\(decodedurl='(.*)',overwrite=false\)/)[1];
-        return Response.json({ Name: name, ServerRelativeUrl: folder + "/" + name });
+        return Response.json({ Name: name, ServerRelativeUrl: parent + "/" + name });
       }
-      return Response.json({ Name: "Documents", ServerRelativeUrl: folder });
+      return Response.json({ Name: "Documents", ServerRelativeUrl: parent });
     };
     const locations = await tabs.listLocations();
-    const created = await tabs.createDocument({ locationId: locations.locations[0].locationId, name: "Draft" });
+    const resolved = (await tabs.resolveLocation({ sourceLocationId: locations.locations[0].locationId, folderPath: folder + "/Reports" })).location;
+    const children = await tabs.listLocationFolders(resolved.locationId);
+    assert.equal(children.folders[0].folderPath, folder + "/Reports/Child");
+    const created = await tabs.createDocument({ locationId: resolved.locationId, name: "Draft" });
+    assert.equal(decodeURIComponent(new URL(created.item.url).pathname), folder + "/Reports/Draft.docx");
     assert.equal(created.created, true);
     assert.equal(created.item.name, "Draft.docx");
     assert.equal(uploads, 1);
@@ -289,6 +296,16 @@ describe("persistent document tabs", () => {
       assert.equal((await call("office_open_document", { url: "file:///etc/passwd" })).isError, true);
       assert.equal((await call("office_open_document", { url: "https://tenant.sharepoint.com/file.xlsx", script: "evil()" })).isError, true);
       assert.equal((await call("office_list_locations")).structuredContent.locations.length, 0);
+      const sourceLocationId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", folderPath = "/sites/team/Documents/Reports";
+      const destination = { locationId: sourceLocationId, folderPath };
+      tabs.resolveLocation = async (args) => { assert.deepEqual(args, { sourceLocationId, folderPath }); return { location: destination }; };
+      tabs.listLocationFolders = async (id) => { assert.equal(id, sourceLocationId); return { folders: [destination], truncated: false }; };
+      assert.deepEqual((await call("office_resolve_location", { sourceLocationId, folderPath })).structuredContent.location, destination);
+      assert.deepEqual((await call("office_list_location_folders", { locationId: sourceLocationId })).structuredContent.folders, [destination]);
+      for (const args of [{ sourceLocationId, folderPath, script: "evil()" }, { sourceLocationId, folderPath, cookies: "private" },
+        { sourceLocationId: "not-an-id", folderPath }, { sourceLocationId }, { folderPath }])
+        assert.equal((await call("office_resolve_location", args)).isError, true);
+      assert.equal((await call("office_list_location_folders", { locationId: sourceLocationId, script: "evil()" })).isError, true);
       for (const args of [{ name: "../Draft" }, { name: "Draft", url: "https://evil.test/" },
         { name: "Draft", contentBase64: "AA==" }, { name: "Draft", script: "evil()" }])
         assert.equal((await call("office_create_document", args)).isError, true);

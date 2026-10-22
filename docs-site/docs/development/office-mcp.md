@@ -170,6 +170,31 @@ probe hot-reloads during source development; MCP callers cannot supply its
 path or code. This lets supported page formats be corrected without repeated
 main-process restarts once the location probe is installed.
 
+`office_resolve_location` verifies an explicit decoded, server-relative
+`folderPath`, using a discovered `sourceLocationId` to bind the account and
+browser frame. Its optional `webUrl` selects an owning site or subsite on the
+same origin; it defaults to the source web. The requested path must lie within
+that web, and the folder metadata must match before a destination ID is issued.
+No Teams navigation or folder creation occurs. Cross-origin destinations need
+a source on their own SharePoint host; browser requests retain same-origin mode.
+Explicit destinations inherit their source's remaining five-minute lifetime
+and navigation binding. Registering them does not change current-folder defaults.
+
+`office_list_location_folders` reads up to 50 immediate children and returns
+usable destination IDs with names, paths and owning web URLs. It validates the
+page's folder metadata before registering destinations and marks truncated
+listings. Neither resolution nor browsing uploads a document. Missing and denied
+folders return bounded diagnostics without server response bodies. Tests cover
+sibling and child destinations, another site/subsite, account binding, expiry,
+source navigation and rejected destination URLs. Live testing verified resolving
+an open document's parent library, browsing its child folders, then creating in
+a sibling of the source folder without navigating Teams or showing Documents.
+First-time Bridge import completed in 7,404 ms after creation; a paragraph write
+and independent readback passed. Sign-in and setup retries were unnecessary. Creation and verified editing in
+the reverse sibling direction also passed with the window hidden.
+Another site's creation remains covered by the isolated Electron fixture rather
+than this live sibling-folder test.
+
 `office_create_document` uploads the bundled blank Word package through
 SharePoint's ResourcePath `AddUsingPath` API with `overwrite=false` and a fresh
 request digest. A fixed app-owned function runs browser `fetch` in the originating
