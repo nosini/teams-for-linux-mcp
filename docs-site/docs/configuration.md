@@ -224,6 +224,25 @@ Direct CSS files remain supported through `appearance.cssLocation` and its legac
 | `useMutationTitleLogic` | `boolean` | `true` | Deprecated, use `tray.useMutationTitleLogic` |
 | `disableBadgeCount` | `boolean` | `false` | Disable the badge counter on the taskbar/dock icon |
 
+#### Presence status on the tray icon
+
+`media.showStatusOnDockIcon` overlays the user's Teams status on the app icon:
+on macOS that is the Dock, and on the platforms that have no Dock it is the tray
+icon, in the bottom-right corner the way the Windows client shows it. Green is
+available, red busy, dark red with a white bar do not disturb, yellow away or be
+right back. While the dot is drawn the unread badge moves to the bottom-left so
+the two never overlap; with the setting off, the badge keeps its usual corner,
+and until a status has been read the icon stays as it was, with no dot at all.
+
+The status comes from the same monitor the MQTT and D-Bus integrations use, which
+reads it off the Teams UI, so the two are enabled independently: with only
+`media.showStatusOnDockIcon` set, the monitor runs and the icon follows it, and
+nothing is published anywhere.
+
+This is best effort. Teams exposes no presence API the app can use, and Teams can
+change its UI without notice, so until the monitor is updated the dot can go
+missing or show the wrong status.
+
 ### Notification System
 
 | Option | Type | Default | Description |
@@ -617,6 +636,12 @@ Screen sharing settings are organized under the `screenSharing` configuration ob
       "enabled": true,
       "alwaysOnTop": true
     },
+    "resolution": {
+      "enabled": false,
+      "mode": "remove",
+      "width": 3440,
+      "height": 1440
+    },
     "lockInhibitionMethod": "Electron"
   }
 }
@@ -626,7 +651,41 @@ Screen sharing settings are organized under the `screenSharing` configuration ob
 |--------|------|---------|-------------|
 | `screenSharing.thumbnail.enabled` | `boolean` | `true` | Automatically show thumbnail window when screen sharing |
 | `screenSharing.thumbnail.alwaysOnTop` | `boolean` | `true` | Keep thumbnail window always on top |
+| `screenSharing.resolution.enabled` | `boolean` | `false` | Enable screen sharing resolution control |
+| `screenSharing.resolution.mode` | `string` | `"remove"` | `remove` removes Teams' resolution constraints so capture can use the source's native resolution. `override` requests the configured width and height as a ceiling. |
+| `screenSharing.resolution.width` | `number` | - | Target width used with `override` |
+| `screenSharing.resolution.height` | `number` | - | Target height used with `override` |
 | `screenSharing.lockInhibitionMethod` | `string` | `"Electron"` | Screen lock inhibition method. Choices: `Electron`, `WakeLockSentinel` |
+
+Screen sharing resolution control is disabled by default. When `enabled` is `false`, the app leaves Teams' resolution constraints unchanged, including constraints applied later during the sharing session. With `mode: "remove"`, the app removes Teams' screen-share resolution limits, allowing the compositor/capture backend to use the native resolution of the selected screen or window. With `mode: "override"`, set `width` and `height` to request a maximum sharing resolution, which can reduce CPU, bandwidth, and encoder load on high-resolution displays. Both enabled modes also protect the active share from later Teams `applyConstraints()` changes.
+
+For example, to cap a 3440x1440 display at 2560x1080:
+
+```json
+{
+  "screenSharing": {
+    "resolution": {
+      "enabled": true,
+      "mode": "override",
+      "width": 2560,
+      "height": 1080
+    }
+  }
+}
+```
+
+To request removal of Teams' resolution constraints (native resolution) instead:
+
+```json
+{
+  "screenSharing": {
+    "resolution": {
+      "enabled": true,
+      "mode": "remove"
+    }
+  }
+}
+```
 
 **Removed Options (migrate before upgrading):**
 
@@ -788,7 +847,7 @@ When MQTT is enabled, the following topics are automatically published:
 | `\{topicPrefix\}/\{statusTopic\}` | JSON object | User presence status (Available, Busy, DND, Away, BRB) |
 | `\{topicPrefix\}/in-call` | `"true"` or `"false"` | Active call state (connected/disconnected). Uses WebRTC fallback for reliable detection even from popup windows. |
 | `\{topicPrefix\}/camera` | `"true"` or `"false"` | Camera on/off state (monitors video sender track via WebRTC, filters out screen-sharing tracks) |
-| `\{topicPrefix\}/microphone` | `"speaking"` \| `"silent"` \| `"muted"` \| `"off"` | Microphone state derived from the WebRTC speaking-indicator. `speaking` = audio is being transmitted, `silent` = mic open but quiet, `muted` = Teams has zeroed the audio signal, `off` = not in a call. Activates when `mqtt.enabled` is true (no separate toggle required). |
+| `\{topicPrefix\}/microphone` | `"speaking"` \| `"silent"` \| `"muted"` \| `"off"` | Microphone state derived from the WebRTC speaking-indicator. `speaking` = audio is being transmitted, `silent` = mic open but quiet, `muted` = the outgoing audio sender stopped sending or Teams has zeroed the audio signal, `off` = not in a call. Activates when `mqtt.enabled` is true (no separate toggle required). |
 | `\{topicPrefix\}/incoming-call` | `"true"` or `"false"` | Incoming call ringing state. Fires before user accepts. Parity with `incomingCallCommand`. Covers 1:1 ring-type calls, calls from phone numbers, and call-queue calls. |
 | `\{topicPrefix\}/incoming-call/caller` | JSON object | Who is calling while `incoming-call` is `"true"`: `scenario`, and where known `number`, `name`, `queue`, `contact` and `callId`, and a `timestamp` and `clientId`. Published just before `incoming-call` goes `"true"`, and again if Teams fills the details in while ringing. Not retained. Off unless `mqtt.incomingCallCaller.enabled` is `true`. |
 | `\{topicPrefix\}/screen-sharing` | `"true"` or `"false"` | Screen sharing active state |

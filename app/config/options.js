@@ -93,6 +93,10 @@ module.exports = {
             enabled: true,
             alwaysOnTop: true,
           },
+          resolution: {
+            enabled: false,
+            mode: "remove",
+          },
           lockInhibitionMethod: "Electron",
         },
         describe:
@@ -107,6 +111,25 @@ module.exports = {
           "thumbnail.alwaysOnTop": {
             type: "boolean",
             describe: "Keep the screen sharing thumbnail window always on top.",
+          },
+          "resolution.enabled": {
+            type: "boolean",
+            describe:
+              "Enable screen sharing resolution control. When false, Teams' resolution constraints are left unchanged.",
+          },
+          "resolution.mode": {
+            type: "string",
+            describe:
+              "Resolution mode: remove disables Teams' screen sharing limits so capture can use its native resolution; override requests the configured width and height as a ceiling.",
+            choices: ["remove", "override"],
+          },
+          "resolution.width": {
+            type: "number",
+            describe: "Target screen sharing width when mode is override; used with height as the maximum requested resolution.",
+          },
+          "resolution.height": {
+            type: "number",
+            describe: "Target screen sharing height when mode is override; used with width as the maximum requested resolution.",
           },
           "lockInhibitionMethod": {
             type: "string",
@@ -791,7 +814,7 @@ module.exports = {
           documentPictureInPicture: true,
         },
         describe:
-          "Media settings for microphone, camera, and video. showStatusOnDockIcon: overlay the user presence status on the Dock icon on macOS. macPerformanceMode: on macOS, force-enable native hardware/rendering optimizations (Metal ANGLE, GPU rasterization, hardware WebRTC codecs) at startup; defaults to true, set false to opt out without disabling the GPU entirely. preventDeviceSwitching: prevent automatic audio/video device switching by blocking device change notifications. documentPictureInPicture: replace Electron's non-functional Document Picture-in-Picture API so Teams can show its floating call controls (Call Monitor) in a small always-on-top window; defaults to true, set false to fall back to Electron's native (broken) API.",
+          "Media settings for microphone, camera, and video. showStatusOnDockIcon: overlay the user presence status on the app icon (the Dock on macOS, the tray icon elsewhere). macPerformanceMode: on macOS, force-enable native hardware/rendering optimizations (Metal ANGLE, GPU rasterization, hardware WebRTC codecs) at startup; defaults to true, set false to opt out without disabling the GPU entirely. preventDeviceSwitching: prevent automatic audio/video device switching by blocking device change notifications. documentPictureInPicture: replace Electron's non-functional Document Picture-in-Picture API so Teams can show its floating call controls (Call Monitor) in a small always-on-top window; defaults to true, set false to fall back to Electron's native (broken) API.",
         type: "object",
         fields: {
           "microphone.disableAutogain": {
@@ -870,7 +893,7 @@ module.exports = {
           "showStatusOnDockIcon": {
             type: "boolean",
             describe:
-              "Overlay the user presence status on the Dock icon on macOS.",
+              "Overlay the user presence status on the app icon: the Dock on macOS, the tray icon on the platforms that have no Dock. While the dot is drawn the unread badge moves to the other corner.",
           },
           "macPerformanceMode": {
             type: "boolean",
