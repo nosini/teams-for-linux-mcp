@@ -154,6 +154,55 @@ final code, a fresh real Word file's automatic import connected in 1,472 ms,
 followed by a successful hidden paragraph read. This measures setup after the
 document loaded, excluding its earlier sign-in and initial page loading.
 
+Document creation is also handled inside Electron. `office_list_locations`
+recognizes open SharePoint library views and document wrappers/direct file
+links, including Teams' `listallitems.aspx`, `filebrowser.aspx` and `DocLibEmbed.aspx` views and
+same-origin `teamslogon.aspx` destinations. Explicit folder parameters take
+precedence over the embedded library's `listUrl`. A fixed read-only probe reads
+the public page-context web URL and known folder-address parameters;
+SharePoint REST resolves document IDs and verifies the parent folder. Temporary
+location IDs bind the source frame URL, browser session and verified folder for
+five minutes. Matching folders deduplicate only within the same session.
+Ambiguous, incomplete or stale discovery requires explicit selection/relisting.
+Unsupported SharePoint views return a bounded ASPX page name, page class and
+known query-key names without query values or page content. The fixed location
+probe hot-reloads during source development; MCP callers cannot supply its
+path or code. This lets supported page formats be corrected without repeated
+main-process restarts once the location probe is installed.
+
+`office_create_document` uploads the bundled blank Word package through
+SharePoint's ResourcePath `AddUsingPath` API with `overwrite=false` and a fresh
+request digest. A fixed app-owned function runs browser `fetch` in the originating
+SharePoint frame with `credentials: "include"` and `mode: "same-origin"`. This
+preserves its browser request context, including User-Agent, Origin and referrer,
+without reading/exporting cookie values or calling Teams' token provider.
+Requests time out and responses are bounded; redirects, permission
+failures and uncertain creation have fixed diagnostics. File names and paths
+are escaped as OData literals and URL components, including apostrophes, `%`
+and `#`. No destination path, URL, file bytes or caller code enters this tool.
+
+After successful creation, DocumentTabs opens the new URL using the same source
+account and starts existing Bridge setup. Opening/setup failure returns
+`created: true` with the file metadata rather than inviting another creation.
+`office_list_location_files` supports an exact-name lookup for recovery and
+reports truncated listings. The document template contains one empty paragraph,
+A4 page settings and no author, macros or external relationships. Creation and
+hidden opening passed an isolated Electron service fixture, including the source
+frame's User-Agent and explicit same-origin credentials. Live testing also
+verified folder discovery from Teams' `filebrowser.aspx`, exact-name listing,
+Word creation without a supplied link, and discovery of the created file.
+After a full app restart with the retained sign-in session, a fresh Word file
+was created, opened hidden, imported its Bridge for the first time, and passed
+a paragraph write and fresh readback in one uninterrupted attempt. Bridge setup
+reported 7,670 ms, including loading after creation and excluding subsequent
+reads and edits. No window was shown, sign-in interaction requested, or setup
+retry made during that run. An earlier attempt needed the account picker shown,
+so this verifies the retained-session path rather than initial authentication.
+Cloud save propagation was not checked.
+
+See Microsoft's [ResourcePath API](https://learn.microsoft.com/en-us/sharepoint/dev/solution-guidance/supporting-and-in-file-and-folder-with-the-resourcepath-api)
+and [SharePoint REST operations](https://learn.microsoft.com/en-us/sharepoint/dev/sp-add-ins/complete-basic-operations-using-sharepoint-rest-endpoints).
+
 Setup allows up to 15 seconds for Microsoft login redirects to complete before
 returning `SIGN_IN_REQUIRED`, within the existing overall setup deadline. It
 reports `waiting_for_sign_in` during this wait. Top-level navigation does not

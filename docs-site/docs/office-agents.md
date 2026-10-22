@@ -55,6 +55,37 @@ client's trust for the local HTTPS certificate and may show an add-in startup
 error. Other editors can close that pane and coauthor normally in their browser;
 they do not need the bridge installed or working there.
 
+## Create a document in the current folder
+
+An agent can create a blank Word document without asking for a file link. Open
+the destination folder in Teams, or open a Word/Excel document already in that
+folder, then ask the agent to create the new document there.
+
+The agent calls `office_list_locations` to discover the open SharePoint folder
+or the parent of the open document. It then calls `office_create_document` with
+a name and the selected `locationId`. The app adds `.docx` if needed, creates
+the file, opens it hidden in the originating account and starts Bridge setup.
+The agent checks `office_list_tabs`, lists the connected document and reads
+before editing. No pasted link or agent-generated Office package is needed.
+
+If several destinations are available, the agent must select the one matching
+your request. It can omit `locationId` only when exactly one folder is available.
+Locations expire after five minutes or when the source page navigates; list
+them again if needed. Unsupported SharePoint views include bounded page-type
+diagnostics without URL query values. The app never overwrites an existing filename. After an
+uncertain creation, the agent uses `office_list_location_files` with the exact
+filename before considering another attempt. A result with `created: true`
+means the file exists even when opening or Bridge setup needs attention.
+
+Creation uses SharePoint's normal permissions and the source view's session
+inside Electron. Cookies and request digests stay inside the app. It does not
+request a Teams token or require the separate Graph channel-file option.
+This currently creates Word `.docx` files; Excel workbook creation is not
+included. Sign-in and Office add-in policy can still require user interaction.
+A fresh Word creation, automatic first-time Bridge import, edit and readback
+have passed after restarting the app with a retained session, with the document
+window hidden throughout and without a sign-in prompt or setup retry.
+
 ## Keep multiple documents open
 
 With MCP enabled, choose **Documents** from the Teams for Linux menu. This
@@ -226,8 +257,10 @@ paragraph. Import and editing ran hidden after the window was shown at the
 Microsoft sign-in page. The original paragraphs were unchanged afterward.
 Word's overflow-menu path needed a UI correction during that test; the reported
 37.8-second successful import run included debugging and is not a clean startup
-benchmark. Fully hidden Word sign-in and simultaneous edits to multiple real
-files remain unverified.
+benchmark. A later fresh Word creation passed fully hidden after an app restart
+using a retained sign-in session, including first-time import and a verified
+edit. Initial authentication and simultaneous edits to multiple real files
+remain separate from that verified path.
 
 ## Connect a local agent
 

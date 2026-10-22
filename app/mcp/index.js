@@ -41,7 +41,7 @@ class OfficeMcp {
         const { DocumentTabs } = require("../office/documentTabs");
         const { RememberDocumentSession } = require("../office/rememberDocumentSession");
         const documentSession = mcp.documentSession?.enabled === true ? new RememberDocumentSession(mcp.documentSession) : null;
-        this.#documentTabs = new DocumentTabs({ getMainWindow: this.#getMainWindow, inspector, liveBridge, manifests: this.#addinHost?.manifests, documentSession });
+        this.#documentTabs = new DocumentTabs({ getMainWindow: this.#getMainWindow, getWebContents: this.#getWebContents, inspector, liveBridge, manifests: this.#addinHost?.manifests, documentSession });
       }
       let channelFiles = null;
       if (mcp.files?.enabled === true) {

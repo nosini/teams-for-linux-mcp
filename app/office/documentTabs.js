@@ -69,6 +69,7 @@ class DocumentTabs {
   #bridge;
   #manifests;
   #documentSession;
+  #locations;
   #window = null;
   #tabs = new Map();
   #selected = null;
@@ -78,13 +79,15 @@ class DocumentTabs {
   #showListener;
   #quitListener;
 
-  constructor({ getMainWindow, inspector, liveBridge = null, manifests = null, documentSession = null, electron = require("electron") }) {
+  constructor({ getMainWindow, inspector, liveBridge = null, manifests = null, documentSession = null, getWebContents = null, electron = require("electron") }) {
     this.#electron = electron;
     this.#getMainWindow = getMainWindow;
     this.#inspector = inspector;
     this.#bridge = liveBridge;
     this.#manifests = manifests;
     this.#documentSession = documentSession;
+    const { DocumentLocations } = require("./documentLocations");
+    this.#locations = new DocumentLocations(getWebContents || (() => electron.webContents.getAllWebContents()));
     this.#showListener = () => { try { this.show(); } catch { /* App is closing. */ } };
     this.#quitListener = () => this.close();
     electron.app.on("office-documents-show", this.#showListener);
@@ -185,6 +188,10 @@ class DocumentTabs {
     const main = this.#getMainWindow();
     // An editor ID binds to its own account; pasted links use the main account.
     const contents = source ? this.#electron.webContents.fromId(source.metadata.webContentsId) : main?.webContents;
+    return this.#open(link, contents, foreground);
+  }
+
+  #open(link, contents, foreground = false) {
     if (!contents || contents.isDestroyed()) throw new Error("The signed-in Teams session is unavailable.");
     const existing = [...this.#tabs.values()].find((tab) => tab.url === link && tab.view.webContents.session === contents.session);
     if (existing) {
@@ -241,6 +248,26 @@ class DocumentTabs {
     if (foreground) this.show(tab.id);
     this.#publish();
     return { tabId: tab.id, reused: false, ...this.#state() };
+  }
+
+  listLocations() { return this.#locations.list(); }
+
+  listLocationFiles(locationId, name) { return this.#locations.listFiles(locationId, name); }
+
+  async createDocument({ locationId, name }) {
+    if (this.#closed || !this.#bridge || !this.#manifests) throw new Error("Enable the Office Bridge and restart Teams before creating a document.");
+    if (this.#tabs.size >= LIMIT) throw new Error("Close a document tab before creating another document. No file was created.");
+    const created = await this.#locations.create(locationId, name);
+    // Creation is already successful. Never turn a later open/setup failure
+    // into an ambiguous creation error that invites another upload.
+    try {
+      const opened = this.#open(documentUrl(created.item.url), created.contents);
+      const setup = await this.setupBridge(opened.tabId);
+      return { created: true, locationId: created.locationId, item: created.item, tabId: opened.tabId, bridgeSetup: setup.bridgeSetup };
+    } catch {
+      return { created: true, locationId: created.locationId, item: created.item, code: "DOCUMENT_CREATED_OPEN_INCOMPLETE",
+        next: "The file exists. Do not create it again. Open it in the same Teams account and use office_open_document / office_setup_bridge." };
+    }
   }
 
   #forgetDocuments(id) { this.#documents = this.#documents.filter((doc) => doc.webContentsId !== id); }
@@ -340,6 +367,7 @@ class DocumentTabs {
     if (this.#closed) return;
     this.#closed = true;
     this.#documentSession?.close();
+    this.#locations.close();
     this.#electron.app.removeListener("office-documents-show", this.#showListener);
     this.#electron.app.removeListener("before-quit", this.#quitListener);
     this.#electron.ipcMain.removeHandler("office-tabs");

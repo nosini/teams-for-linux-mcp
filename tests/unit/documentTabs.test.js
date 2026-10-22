@@ -1,5 +1,6 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
+const vm = require("node:vm");
 const { EventEmitter } = require("node:events");
 const { DocumentTabs, documentUrl, allowedNavigation, sourceDocumentUrl } = require("../../app/office/documentTabs");
 const { createOfficeMcpServer } = require("../../app/mcp/server");
@@ -40,7 +41,7 @@ function fixture(t, documentSession = null) {
   }
   class View { constructor(options) { this.options = options; this.webContents = new Contents(options.webPreferences); views.push(this); } setBounds(bounds) { this.bounds = bounds; } setVisible(value) { this.visible = value; } }
   const app = new EventEmitter();
-  const electron = { app, BrowserWindow: Window, WebContentsView: View, ipcMain: { handle: (name, handler) => handlers.set(name, handler), removeHandler: (name) => handlers.delete(name) }, webContents: { fromId: (id) => contents.get(id) } };
+  const electron = { app, BrowserWindow: Window, WebContentsView: View, ipcMain: { handle: (name, handler) => handlers.set(name, handler), removeHandler: (name) => handlers.delete(name) }, webContents: { fromId: (id) => contents.get(id), getAllWebContents: () => [...contents.values()] } };
   const main = { webContents: new Contents() };
   const otherAccount = new Contents();
   const frame = { url: "https://tenant.sharepoint.com/_layouts/15/Doc.aspx?sourcedoc=private" };
@@ -53,6 +54,51 @@ function fixture(t, documentSession = null) {
 }
 
 describe("persistent document tabs", () => {
+  it("creates in the discovered account, opens hidden and starts Bridge setup without a pasted URL", async (t) => {
+    const { tabs, windows, views, main, otherAccount, setDocuments } = fixture(t);
+    const folder = "/sites/team/Shared Documents";
+    const source = { url: "https://tenant.sharepoint.com/sites/team/Shared%20Documents/Forms/AllItems.aspx",
+      executeJavaScript: async (script) => vm.runInNewContext(script, {
+        location: new URL(source.url), URL, Date, _spPageContextInfo: { webAbsoluteUrl: "https://tenant.sharepoint.com/sites/team" },
+        fetch: (url, options) => otherAccount.session.fetch(url, options), AbortController, Uint8Array, TextDecoder, atob, setTimeout, clearTimeout,
+      }) };
+    otherAccount.mainFrame.framesInSubtree = [source];
+    let uploads = 0;
+    main.webContents.session.fetch = () => assert.fail("Do not use the main account");
+    otherAccount.session.fetch = async (url, options) => {
+      if (url.includes("contextinfo")) return Response.json({ FormDigestValue: "private-digest" });
+      if (options.body) {
+        uploads++;
+        const name = decodeURIComponent(new URL(url).pathname).match(/AddUsingPath\(decodedurl='(.*)',overwrite=false\)/)[1];
+        return Response.json({ Name: name, ServerRelativeUrl: folder + "/" + name });
+      }
+      return Response.json({ Name: "Documents", ServerRelativeUrl: folder });
+    };
+    const locations = await tabs.listLocations();
+    const created = await tabs.createDocument({ locationId: locations.locations[0].locationId, name: "Draft" });
+    assert.equal(created.created, true);
+    assert.equal(created.item.name, "Draft.docx");
+    assert.equal(uploads, 1);
+    assert.equal(views[0].webContents.session, otherAccount.session);
+    assert.equal(windows[0].visible, false);
+    assert.equal(created.bridgeSetup.status, "running");
+    setDocuments([{ id: "created-word", webContentsId: views[0].webContents.id, application: "word" }]);
+    assert.equal((await tabs.list()).tabs[0].connected, true);
+    tabs.setupBridge = async () => { throw new Error("private setup failure"); };
+    const incomplete = await tabs.createDocument({ locationId: locations.locations[0].locationId, name: "Second" });
+    assert.equal(incomplete.created, true);
+    assert.equal(incomplete.item.name, "Second.docx");
+    assert.equal(incomplete.code, "DOCUMENT_CREATED_OPEN_INCOMPLETE");
+    assert.equal(uploads, 2, "A setup failure does not repeat creation");
+    assert.doesNotMatch(JSON.stringify(incomplete), /private setup failure/);
+  });
+
+  it("does not create cloud files when no document tab slot is available", async (t) => {
+    const { tabs } = fixture(t);
+    for (let index = 0; index < 16; index++) tabs.open({ url: "https://tenant.sharepoint.com/file" + index + ".docx" });
+    await assert.rejects(tabs.createDocument({ name: "Draft" }), /No file was created/);
+  });
+
   it("scopes optional sign-in persistence to the opened view's account and cleans up on quit", (t) => {
     const watched = []; let closed = 0;
     const { tabs, main, otherAccount } = fixture(t, { watch: (session, url) => watched.push({ session, url }), close: () => { closed++; } });
@@ -242,6 +288,10 @@ describe("persistent document tabs", () => {
       assert.equal((await call("office_list_tabs")).structuredContent.tabs.length, 1);
       assert.equal((await call("office_open_document", { url: "file:///etc/passwd" })).isError, true);
       assert.equal((await call("office_open_document", { url: "https://tenant.sharepoint.com/file.xlsx", script: "evil()" })).isError, true);
+      assert.equal((await call("office_list_locations")).structuredContent.locations.length, 0);
+      for (const args of [{ name: "../Draft" }, { name: "Draft", url: "https://evil.test/" },
+        { name: "Draft", contentBase64: "AA==" }, { name: "Draft", script: "evil()" }])
+        assert.equal((await call("office_create_document", args)).isError, true);
       const { tabId } = opened.structuredContent;
       const inspection = await call("office_inspect_bridge_setup", { tabId });
       assert.equal(inspection.structuredContent.application, null);
