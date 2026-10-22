@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const https = require("node:https");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const { Client } = require("@modelcontextprotocol/client");
 const { StdioClientTransport } = require("@modelcontextprotocol/client/stdio");
 const { OfficeMcp } = require("../../app/mcp");
@@ -11,7 +12,7 @@ const { excelFixture } = require("../fixtures/excelApi");
 const { wordFixture } = require("../fixtures/wordApi");
 const { officeImportFixture } = require("../fixtures/officeImport");
 
-const profile = path.resolve(__dirname, "../../test-results/tabs-profile");
+const profile = testPath("tabs-profile");
 app.setPath("userData", profile);
 app.disableHardwareAcceleration();
 const testingSetup = process.env.DOCUMENT_TABS_SETUP === "1";

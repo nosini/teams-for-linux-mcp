@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const net = require("node:net");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const { once } = require("node:events");
 const { spawn, execFile } = require("node:child_process");
 const { promisify } = require("node:util");
@@ -16,7 +17,7 @@ const execFileAsync = promisify(execFile);
 const diagnosticScript = path.resolve(__dirname, "../../scripts/diagnoseOfficeMcp.js");
 
 async function testDirectory(t) {
-  const root = path.resolve(__dirname, "../../test-results/mcp");
+  const root = testPath("mcp");
   await fs.mkdir(root, { recursive: true });
   const directory = await fs.mkdtemp(path.join(root, "run-"));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

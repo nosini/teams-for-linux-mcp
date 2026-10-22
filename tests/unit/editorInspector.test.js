@@ -8,6 +8,7 @@ const { StdioClientTransport } = require("@modelcontextprotocol/client/stdio");
 const { startLocalEndpoint } = require("../../app/mcp/localEndpoint");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 
 const frame = (url, executeJavaScript = async () => ({})) => ({ url, processId: 1, routingId: 2, executeJavaScript });
 const inspector = (frames, options) => new SurfaceInspector(() => [{ id: 3, isDestroyed: () => false, mainFrame: { framesInSubtree: frames } }], options);
@@ -113,7 +114,7 @@ describe("Non-Office editor diagnostics", () => {
 
   it("registers strict, read-only MCP diagnostics without a JavaScript argument", async (t) => {
     const service = inspector([frame("https://tenant.sharepoint.com/", async () => ({ surfaces: { monaco: 1 } }))]);
-    const root = path.resolve(__dirname, "../../test-results/mcp");
+    const root = testPath("mcp");
     await fs.mkdir(root, { recursive: true });
     const directory = await fs.mkdtemp(path.join(root, "surface-"));
     const endpoint = await startLocalEndpoint({ directory, createServer: () => createOfficeMcpServer({ listEditors: () => ({ editors: [] }) }, null, null, service) });

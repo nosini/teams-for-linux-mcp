@@ -2,12 +2,12 @@
 // with DOCUMENT_AUTH_PHASE=write, then read, against the same isolated profile.
 const { app, BrowserWindow, session } = require("electron");
 const assert = require("node:assert/strict");
-const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const { inspectDocumentAuthentication } = require("../../app/office/documentAuthentication");
 const { DocumentTabs } = require("../../app/office/documentTabs");
 const { RememberDocumentSession } = require("../../app/office/rememberDocumentSession");
 
-app.setPath("userData", path.resolve(__dirname, `../../test-results/document-auth-profile${process.env.DOCUMENT_AUTH_PERSIST === "1" ? "-persistent" : ""}`));
+app.setPath("userData", testPath(`document-auth-profile${process.env.DOCUMENT_AUTH_PERSIST === "1" ? "-persistent" : ""}`));
 app.disableHardwareAcceleration();
 const deadline = setTimeout(() => app.exit(1), 15000);
 const persist = process.env.DOCUMENT_AUTH_PERSIST === "1";

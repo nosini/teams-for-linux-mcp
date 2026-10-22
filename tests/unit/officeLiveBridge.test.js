@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const vm = require("node:vm");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const { randomUUID } = require("node:crypto");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
@@ -113,7 +114,7 @@ describe("Live Office bridge", () => {
   });
 
   it("serves the full read/write workflow through the official MCP client", async (t) => {
-    const root = path.resolve(__dirname, "../../test-results/mcp");
+    const root = testPath("mcp");
     await fs.mkdir(root, { recursive: true });
     const directory = await fs.mkdtemp(path.join(root, "live-"));
     const { bridge, model, id } = fixture();
@@ -148,7 +149,7 @@ describe("Live Office bridge", () => {
 
   it("serves extended inspection and editing through MCP with strict schemas and host binding", async (t) => {
     for (const application of ["excel", "word"]) await t.test(application, async (t) => {
-      const root = path.resolve(__dirname, "../../test-results/mcp");
+      const root = testPath("mcp");
       await fs.mkdir(root, { recursive: true });
       const directory = await fs.mkdtemp(path.join(root, "editing-"));
       const { bridge, id } = fixture(application);
@@ -192,7 +193,7 @@ describe("Live Office bridge", () => {
   });
 
   it("serves Word reads and replacements through the official MCP client and validates inputs", async (t) => {
-    const root = path.resolve(__dirname, "../../test-results/mcp");
+    const root = testPath("mcp");
     await fs.mkdir(root, { recursive: true });
     const directory = await fs.mkdtemp(path.join(root, "word-"));
     const { bridge, model, id } = fixture("word");

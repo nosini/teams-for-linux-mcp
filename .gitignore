@@ -1,17 +1,6 @@
-node_modules/
-dist/
-parts/
-snap/.snapcraft/
-generated-sources.json
-.flatpak-builder/
-flatpak-build/
-.idea
-.DS_Store
-release-info.json
-debian-changelog
-.mcp.json
-
-# Playwright test results
-test-results/
-playwright-report/
-.auth/
+/build/
+/node_modules/
+/test-results/
+/.mcp.json
+/.auth/
+/.DS_Store

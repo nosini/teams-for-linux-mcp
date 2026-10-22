@@ -1,0 +1,30 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: dependencies/package-lock.json
+      - run: npm run install:app
+      - run: npm test
+        env:
+          TEAMS_MCP_TEST_TMP: ${{ runner.temp }}/teams-office
+      - run: npm run lint
+      - name: Audit app dependencies
+        working-directory: build/teams-office
+        run: npm audit --audit-level=critical

@@ -1,0 +1,32 @@
+{
+  "scripts": {
+    "mcp:diagnose": "node scripts/diagnoseOfficeMcp.js",
+    "mcp:call": "node scripts/callOfficeMcp.js",
+    "mcp:setup": "node scripts/setupOfficeMcp.js",
+    "prestart": null
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
+    "cbor-x": "^1.6.7",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1"
+  },
+  "description": "Teams Office: Microsoft Teams with a local Word and Excel MCP bridge",
+  "homepage": "https://github.com/nosini/teams-for-linux-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nosini/teams-for-linux-mcp.git"
+  },
+  "build": {
+    "linux": {
+      "publish": {
+        "provider": "github",
+        "owner": "nosini",
+        "repo": "teams-for-linux-mcp",
+        "releaseType": "draft"
+      }
+    }
+  }
+}

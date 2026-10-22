@@ -1,0 +1,3 @@
+[submodule "teams-for-linux"]
+	path = upstream/teams-for-linux
+	url = https://github.com/IsmaelMartinez/teams-for-linux.git

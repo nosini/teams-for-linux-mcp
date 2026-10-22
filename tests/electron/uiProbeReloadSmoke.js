@@ -2,10 +2,11 @@
 const { app, BrowserWindow } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const assert = require("node:assert/strict");
 const { createBridgeSetupUiLoader } = require("../../app/office/bridgeSetupUiLoader");
 
-const parent = path.resolve(__dirname, "../../test-results");
+const parent = testPath();
 app.setPath("userData", path.join(parent, "reload-profile"));
 app.disableHardwareAcceleration();
 const timer = setTimeout(() => app.exit(1), 15000);

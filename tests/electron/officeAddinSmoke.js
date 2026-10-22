@@ -4,13 +4,14 @@ const { app, BrowserWindow, session, webContents } = require("electron");
 const fs = require("node:fs/promises");
 const https = require("node:https");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const assert = require("node:assert/strict");
 const { startAddinHost } = require("../../app/office/addinHost");
 const { LiveOfficeBridge } = require("../../app/office/liveBridge");
 const { excelFixture } = require("../fixtures/excelApi");
 const { wordFixture } = require("../fixtures/wordApi");
 
-app.setPath("userData", path.resolve(__dirname, "../../test-results/mcp/addin-electron-profile"));
+app.setPath("userData", testPath("mcp/addin-electron-profile"));
 app.disableHardwareAcceleration();
 const deadline = setTimeout(() => app.exit(1), 30000);
 

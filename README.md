@@ -1,102 +1,67 @@
-# Teams for Linux
+# Teams Office
 
-[![Matrix Space](https://img.shields.io/matrix/teams-for-linux-space%3Amatrix.org?server_fqdn=matrix.org&label=Matrix%20Space)](https://matrix.to/#/#teams-for-linux-space:matrix.org "Matrix Space")
-![](https://img.shields.io/github/release/IsmaelMartinez/teams-for-linux.svg?style=flat)
-![](https://img.shields.io/github/downloads/IsmaelMartinez/teams-for-linux/total.svg?style=flat)
-![Build & Release](https://github.com/IsmaelMartinez/teams-for-linux/workflows/Build%20&%20Release/badge.svg)
-![](https://img.shields.io/librariesio/github/IsmaelMartinez/teams-for-linux)
-[![Known Vulnerabilities](https://snyk.io//test/github/IsmaelMartinez/teams-for-linux/badge.svg?targetFile=package.json)](https://snyk.io//test/github/IsmaelMartinez/teams-for-linux?targetFile=package.json)
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=IsmaelMartinez_teams-for-linux&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=IsmaelMartinez_teams-for-linux)
+Teams Office is [Teams for Linux](https://github.com/IsmaelMartinez/teams-for-linux)
+with a local MCP bridge for AI agents. Agents can open Word and Excel documents
+in background tabs, create Word documents in existing SharePoint folders, and
+read and edit documents through an Office add-in. Office handles saving and
+coauthoring as usual.
 
-**Unofficial Microsoft Teams client for Linux** — a native desktop app that wraps the Teams web version with enhanced Linux integration.
+This is an unofficial client, independent of Microsoft and the upstream Teams
+for Linux project.
 
-✅ **System notifications**  
-✅ **System tray integration** (badge support varies by desktop environment)  
-✅ **Custom backgrounds & themes**  
-✅ **Screen sharing support**  
-✅ **Multiple account profiles**  
+## Install
 
-> [!NOTE]
-> This is an independent project, not affiliated with Microsoft. Some features are limited by the Teams web app.
+Install the [Teams Office Flatpak](https://github.com/nosini/teams-office-flatpak):
 
-## Sponsor
+```sh
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user https://nosini.github.io/teams-office-flatpak/teams-office.flatpakref
+```
 
-### Recall.ai — API for Meeting Recording and Transcription
-> If you're looking for a meeting recording API, consider checking out [Recall.ai](https://www.recall.ai/product/microsoft-teams-recording-api?utm_source=github&utm_medium=sponsorship&utm_campaign=ismaelmartinez-teams-for-linux), an API that records and transcribes Zoom, Google Meet, Microsoft Teams, in-person meetings, and more.
+Start **Teams Office** from your application menu and sign in to Teams. It
+installs alongside the regular Teams for Linux client with its own settings.
 
-_This sponsorship helps support the ongoing development of teams-for-linux._
+## Connect your agent
 
-## Installation
+The Flatpak enables the bridge automatically. Point your agent's Teams Office
+MCP connection at:
 
-### Package Repositories
+```text
+~/.var/app/eu.nosini.TeamsOffice/config/teams-for-linux/mcp/bridge.sock
+```
 
-We have dedicated Debian/DEB and RHEL/Fedora/RPM repositories at https://teamsforlinux.de hosted with :heart: by [Nils Büchner](https://github.com/nbuechner). Please follow the installation instructions there.
+Open a Word or Excel document, then choose **Documents > Connect Bridge**, or
+ask your agent to set up the bridge. Sign-in, MFA and your organization's
+Office add-in policy can require your interaction.
 
-### Distribution Packages
+The [agent guide](docs/office-agents.md) explains connection setup, exporting a
+standalone relay, container connections and the available tools.
 
-[![AUR: teams-for-linux](https://img.shields.io/badge/AUR-teams--for--linux-blue.svg)](https://aur.archlinux.org/packages/teams-for-linux)
-[![Pacstall: teams-for-linux-deb](https://img.shields.io/badge/Pacstall-teams--for--linux--deb-00958C)](https://github.com/pacstall/pacstall-programs/tree/master/packages/teams-for-linux-deb)
-[![Vylen Linux: teams-for-linux](https://img.shields.io/badge/Vylen_Linux-teams--for--linux-green)](https://vylen.gitlab.io/packages/#teams-for-linux)  
-[![Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-black.svg)](https://snapcraft.io/teams-for-linux)
-<a href='https://flathub.org/apps/details/com.github.IsmaelMartinez.teams_for_linux'><img width='170' alt='Download on Flathub' src='https://flathub.org/assets/badges/flathub-badge-en.png'/></a>
+## What agents can do
 
-### Manual Download
+- Open Word and Excel documents in independent background tabs.
+- Find existing SharePoint folders and create Word documents there.
+- Read and edit Excel values, formulas, formatting and worksheet structure.
+- Read Word paragraphs and tables, edit text and styles, work with comments,
+  and review tracked changes.
 
-Download from [GitHub Releases](https://github.com/IsmaelMartinez/teams-for-linux/releases) — available as AppImage, deb, rpm, snap, tar.gz (plus Windows/macOS builds).
+Reads return short-lived tokens. If the content changes before an edit, the
+agent must read it again. Microsoft permissions still apply. Experimental
+Markdown editing and channel-file tools require separate configuration.
 
-> [!TIP]
-> For AppImage files, use [`AppImageLauncher`](https://github.com/TheAssassin/AppImageLauncher) for better desktop integration.
+## Local access
 
-## Quick Start
+The bridge uses a private Unix socket. The Office add-in is served over HTTPS
+on loopback with a certificate trusted only by this client. Expose only the
+socket to an agent container: the adjacent add-in directory contains the
+certificate's private key. Connected agents can access documents through the
+enabled tools; give the socket only to agents you trust.
 
-1. **Install** using your preferred method above
-2. **Launch** with `teams-for-linux` 
-3. **Configure** by creating `~/.config/teams-for-linux/config.json` if needed
+## License and development
 
-## Documentation
+Teams for Linux and the Office bridge are licensed under
+[GPL-3.0-or-later](LICENSE.md). Upstream retains its own source, history and
+documentation under `upstream/teams-for-linux`.
 
-📖 **[Complete Documentation](https://ismaelmartinez.github.io/teams-for-linux/)** — Enhanced documentation with search, mobile optimization, and comprehensive guides
-
-| Topic | Description |
-|-------|-------------|
-| **[Installation Guide](https://ismaelmartinez.github.io/teams-for-linux/installation)** | Package repositories and installation methods |
-| **[Configuration Guide](https://ismaelmartinez.github.io/teams-for-linux/configuration)** | Complete setup and configuration options |
-| **[Troubleshooting](https://ismaelmartinez.github.io/teams-for-linux/troubleshooting)** | Common issues and solutions |
-| **[Multiple Profiles](https://ismaelmartinez.github.io/teams-for-linux/multiple-instances)** | Running work & personal accounts |
-| **[Custom Backgrounds](https://ismaelmartinez.github.io/teams-for-linux/custom-backgrounds)** | Video call backgrounds setup |
-| **[Contributing](https://ismaelmartinez.github.io/teams-for-linux/contributing)** | Development setup and contribution guidelines |
-| **[Privacy & Data Protection](https://ismaelmartinez.github.io/teams-for-linux/privacy)** | What personal data the app does and does not handle |
-
-## Project Activity
-
-![Alt](https://repobeats.axiom.co/api/embed/e63dcc8b154ee5f4490674818df091c243b041b7.svg "Repobeats analytics image")
-
-## Support & Community
-
-- 💬 **Chat**: Join our [Matrix Space](https://matrix.to/#/#teams-for-linux-space:matrix.org)
-- 🐛 **Issues**: [Report bugs](https://github.com/IsmaelMartinez/teams-for-linux/issues)
-- 🤝 **Contributing**: See [`CONTRIBUTING.md`](CONTRIBUTING.md)
-
-## Security & Sandboxing
-
-Electron's contextIsolation and sandbox features are disabled to enable Teams DOM access functionality. For enhanced security, use system-level sandboxing:
-
-**Available options**:
-- **Flatpak**: Built-in isolation via Flathub
-- **Snap packages**: Application confinement with auto-updates
-- **Firejail**: Use this [script](https://codeberg.org/lars_uffmann/teams-for-linux-jailed) for manual sandboxing
-- **AppArmor/SELinux**: Most Linux distributions include these by default
-
-System-level sandboxing provides better isolation than Electron's built-in features while preserving full functionality.
-
-## Advanced Usage
-
-## History
-
-Read about the history of this project in the [`HISTORY.md`](HISTORY.md) file.
-
-## License
-
-**GPL-3.0** — See [`LICENSE.md`](LICENSE.md)
-
-Icons from [Icon Duck](https://iconduck.com/sets/hugeicons-essential-free-icons) (CC BY 4.0)
+See [development](docs/development.md) for the source layout, building, testing
+and updating the pinned upstream version.

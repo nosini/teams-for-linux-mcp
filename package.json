@@ -1,211 +1,27 @@
 {
-  "name": "teams-for-linux",
+  "name": "teams-for-linux-mcp",
   "version": "2.27.0",
-  "main": "app/index.js",
-  "description": "Unofficial client for Microsoft Teams for Linux",
-  "homepage": "https://github.com/IsmaelMartinez/teams-for-linux",
-  "keywords": [
-    "Teams",
-    "Microsoft Teams"
-  ],
+  "private": true,
+  "description": "Teams Office source, documentation and integration with Teams for Linux",
+  "license": "GPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "git+ssh://github.com/IsmaelMartinez/teams-for-linux"
+    "url": "https://github.com/nosini/teams-for-linux-mcp.git"
   },
-  "author": {
-    "name": "Ismael Martinez",
-    "email": "ismaelmartinez@gmail.com",
-    "url": "https://github.com/IsmaelMartinez/"
-  },
-  "license": "GPL-3.0-or-later",
   "scripts": {
-    "postinstall": "electron-builder install-app-deps",
-    "lint": "eslint .",
-    "mcp:diagnose": "node scripts/diagnoseOfficeMcp.js",
-    "mcp:call": "node scripts/callOfficeMcp.js",
-    "test:unit": "node --test 'tests/unit/*.test.js'",
-    "test:e2e": "playwright test",
-    "test:authenticated": "playwright test --config playwright.authenticated.config.js",
-    "cross-distro": "cd tests/cross-distro && ./run.sh",
-    "cross-distro:list": "cd tests/cross-distro && ./run.sh --list",
-    "cross-distro:smoke": "cd tests/cross-distro && ./scripts/smoke-check.sh",
-    "prestart": "npm ci",
-    "start": "electron ./app --trace-warnings",
-    "start:dev": "electron ./app --trace-warnings --no-sandbox",
-    "generate-release-info": "node scripts/generateReleaseInfo.js",
-    "generate-ipc-docs": "node scripts/generateIpcDocs.js",
-    "generate-config-docs": "node scripts/generateConfigDocs.js",
-    "prebuild": "npm run generate-release-info",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
-    "dist:linux": "electron-builder --linux",
-    "dist:linux:targz": "electron-builder --x64 --arm64 -l tar.gz",
-    "dist:linux:deb": "electron-builder --x64 --arm64 -l deb",
-    "dist:linux:rpm": "electron-builder --x64 --arm64 -l rpm",
-    "dist:linux:appimage": "electron-builder --x64 --arm64 -l AppImage",
-    "dist:linux:snap": "electron-builder -l snap",
-    "dist:linux:snap:arm64": "electron-builder --arm64 -l snap",
-    "dist:mac": "electron-builder --mac --x64 --arm64 -c.mac.identity=-",
-    "dist:mac:x64": "electron-builder --mac --x64",
-    "dist:mac:arm64": "electron-builder --mac --arm64",
-    "dist:windows": "electron-builder --windows --x64",
-    "dist:linux:x64": "electron-builder --x64 -l tar.gz deb rpm AppImage",
-    "dist:linux:arm64": "electron-builder --arm64 -l tar.gz deb rpm AppImage",
-    "release": "electron-builder",
-    "mcp:setup": "node scripts/setupOfficeMcp.js"
-  },
-  "dependencies": {
-    "@homebridge/dbus-native": "0.7.9",
-    "@modelcontextprotocol/server": "2.3.1",
-    "cbor-x": "^1.6.7",
-    "electron-log": "^5.4.4",
-    "electron-store": "11.0.2",
-    "electron-updater": "^6.8.9",
-    "electron-window-state": "5.0.3",
-    "mqtt": "^5.16.1",
-    "yargs": "^18.2.0",
-    "zod": "4.6.7"
-  },
-  "devDependencies": {
-    "@electron/fuses": "^2.1.3",
-    "@eslint/js": "^10.0.1",
-    "@modelcontextprotocol/client": "2.3.1",
-    "@playwright/test": "1.64.1",
-    "electron": "44.9.0",
-    "electron-builder": "26.15.7",
-    "eslint": "^10.13.0",
-    "globals": "^17.13.0",
-    "http-server": "^14.1.1",
-    "xml2js": "^0.6.2"
-  },
-  "overrides": {
-    "follow-redirects": "^1.16.1"
-  },
-  "build": {
-    "appId": "teams-for-linux",
-    "files": [
-      "app/**/*",
-      "!app/customBackground/example${/*}",
-      "LICENSE.md"
-    ],
-    "asarUnpack": [
-      "node_modules/spellchecker/vendor/hunspell_dictionaries"
-    ],
-    "protocols": {
-      "name": "msteams",
-      "schemes": [
-        "msteams"
-      ]
-    },
-    "extraResources": [
-      {
-        "from": "app/assets/sounds",
-        "to": "assets/sounds"
-      }
-    ],
-    "linux": {
-      "category": "Chat;Network;Office",
-      "packageCategory": "net",
-      "executableName": "teams-for-linux",
-      "synopsis": "Teams for Linux",
-      "description": "Unofficial Microsoft Teams client for Linux using Electron. It uses the Web App and wraps it as a standalone application using Electron.",
-      "executableArgs": [
-        "--ozone-platform=x11"
-      ],
-      "desktop": {
-        "entry": {
-          "Name": "Teams for Linux",
-          "Comment": "Unofficial client for Microsoft Teams for Linux"
-        }
-      },
-      "target": [
-        "rpm",
-        "deb",
-        "tar.gz",
-        "AppImage"
-      ],
-      "publish": {
-        "provider": "github",
-        "releaseType": "draft"
-      },
-      "releaseInfo": {
-        "releaseNotesFile": "release-info.json"
-      }
-    },
-    "rpm": {
-      "depends": [
-        "gtk3",
-        "libnotify",
-        "nss",
-        "libXScrnSaver",
-        "(libXtst or libXtst6)",
-        "xdg-utils",
-        "at-spi2-core",
-        "(libuuid or libuuid1)"
-      ],
-      "fpm": [
-        "--rpm-rpmbuild-define=_build_id_links  none",
-        "--rpm-digest=sha256",
-        "--rpm-tag=Recommends: fido2-tools"
-      ]
-    },
-    "deb": {
-      "depends": [
-        "libgtk-3-0",
-        "libnotify4",
-        "libnss3",
-        "libxss1",
-        "libxtst6",
-        "xdg-utils",
-        "libatspi2.0-0",
-        "libuuid1",
-        "libsecret-1-0",
-        "libgbm1",
-        "libasound2t64 | libasound2"
-      ],
-      "recommends": [
-        "libappindicator3-1",
-        "fido2-tools"
-      ]
-    },
-    "snap": {
-      "summary": "Teams for Linux",
-      "confinement": "strict",
-      "grade": "stable",
-      "base": "core22",
-      "executableArgs": [
-        "--ozone-platform=x11"
-      ],
-      "plugs": [
-        "default",
-        "audio-record",
-        "camera",
-        "hardware-observe",
-        "network-bind",
-        "network-manager-observe",
-        "removable-media",
-        "screen-inhibit-control",
-        "system-observe",
-        "upower-observe"
-      ],
-      "publish": [
-        "snapStore"
-      ]
-    },
-    "mac": {
-      "category": "public.app-category.productivity",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "extendInfo": {
-        "NSCameraUsageDescription": "We need camera access for video calls.",
-        "NSMicrophoneUsageDescription": "We need microphone access for audio."
-      },
-      "hardenedRuntime": true,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
-    },
-    "afterPack": "scripts/afterpack.js"
+    "prepare:app": "node scripts/prepare-app.js",
+    "install:app": "npm run prepare:app && npm --prefix build/teams-office ci --ignore-scripts",
+    "update:lock": "node scripts/update-lock.js",
+    "start": "node scripts/run-app.js start",
+    "start:dev": "node scripts/run-app.js start:dev",
+    "test": "npm run test:build && npm run test:unit",
+    "test:build": "node --test test/*.test.js",
+    "test:unit": "node scripts/run-app.js test:unit",
+    "test:e2e": "node scripts/run-app.js test:e2e",
+    "lint": "npm run prepare:app && build/teams-office/node_modules/.bin/eslint --config eslint.config.mjs scripts tools src tests test && npm --prefix build/teams-office run lint",
+    "pack": "node scripts/run-app.js pack --publish never",
+    "mcp:diagnose": "node scripts/run-app.js mcp:diagnose",
+    "mcp:call": "node scripts/run-app.js mcp:call",
+    "mcp:setup": "node scripts/run-app.js mcp:setup"
   }
 }

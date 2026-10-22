@@ -1,12 +1,12 @@
 // Real hidden Electron account selection against simulated Microsoft pages.
 const { app, BrowserWindow, session, webContents } = require("electron");
 const assert = require("node:assert/strict");
-const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const { DocumentTabs } = require("../../app/office/documentTabs");
 const { inspectDocumentAccount, selectDocumentAccount, getRememberedDocumentAccount } = require("../../app/office/documentAccount");
 const { documentAccountUi } = require("../../app/office/documentAccountUi");
 
-app.setPath("userData", path.resolve(__dirname, "../../test-results/document-account-profile"));
+app.setPath("userData", testPath("document-account-profile"));
 app.disableHardwareAcceleration();
 const deadline = setTimeout(() => app.exit(1), 45000);
 app.whenReady().then(async () => {

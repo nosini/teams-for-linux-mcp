@@ -2,12 +2,13 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const { Client } = require("@modelcontextprotocol/client");
 const { StdioClientTransport } = require("@modelcontextprotocol/client/stdio");
 const { OfficeMcp } = require("../../app/mcp");
 
 async function userData(t) {
-  const root = path.resolve(__dirname, "../../test-results/mcp");
+  const root = testPath("mcp");
   await fs.mkdir(root, { recursive: true });
   const directory = await fs.mkdtemp(path.join(root, "startup-"));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

@@ -2,6 +2,7 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const https = require("node:https");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
@@ -9,7 +10,7 @@ const { startAddinHost } = require("../../app/office/addinHost");
 const { parseStringPromise } = require("xml2js");
 
 async function fixture(t) {
-  const root = path.resolve(__dirname, "../../test-results/mcp");
+  const root = testPath("mcp");
   await fs.mkdir(root, { recursive: true });
   const directory = await fs.mkdtemp(path.join(root, "host-"));
   const host = await startAddinHost({ directory, port: 0 });

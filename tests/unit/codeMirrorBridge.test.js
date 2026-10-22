@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const { CodeMirrorBridge, allowedFrame } = require("../../app/editor/codeMirrorBridge");
 const { codeMirrorCommand } = require("../../app/editor/codeMirrorCommand");
 const { SurfaceInspector } = require("../../app/editor/inspector");
@@ -152,7 +153,7 @@ describe("Native CodeMirror bridge", () => {
 
   it("supports the full flow through the official MCP client and rejects caller scripts", async (t) => {
     const { bridge, model } = fixture("Hello");
-    const root = path.resolve(__dirname, "../../test-results/mcp");
+    const root = testPath("mcp");
     await fs.mkdir(root, { recursive: true });
     const directory = await fs.mkdtemp(path.join(root, "codemirror-"));
     const endpoint = await startLocalEndpoint({ directory, createServer: () => createOfficeMcpServer({ listEditors: () => ({ editors: [] }) }, null, null, null, bridge) });

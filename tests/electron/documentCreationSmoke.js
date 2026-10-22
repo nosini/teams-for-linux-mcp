@@ -2,10 +2,10 @@
 // Microsoft or creates real cloud files. No external dependencies/downloads.
 const { app, BrowserWindow, session, webContents } = require("electron");
 const assert = require("node:assert/strict");
-const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const { DocumentTabs } = require("../../app/office/documentTabs");
 
-app.setPath("userData", path.resolve(__dirname, "../../test-results/document-create-profile"));
+app.setPath("userData", testPath("document-create-profile"));
 app.disableHardwareAcceleration();
 const deadline = setTimeout(() => app.exit(1), 20000);
 app.whenReady().then(async () => {

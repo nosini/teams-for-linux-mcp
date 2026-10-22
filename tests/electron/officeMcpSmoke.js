@@ -3,11 +3,12 @@
 const { app, BrowserWindow, session, webContents } = require("electron");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const { OfficeInspector } = require("../../app/office/inspector");
 const { startLocalEndpoint } = require("../../app/mcp/localEndpoint");
 const { createOfficeMcpServer } = require("../../app/mcp/server");
 
-app.setPath("userData", path.resolve(__dirname, "../../test-results/mcp/electron-profile"));
+app.setPath("userData", testPath("mcp/electron-profile"));
 app.disableHardwareAcceleration();
 const deadline = setTimeout(() => app.exit(1), 20000);
 

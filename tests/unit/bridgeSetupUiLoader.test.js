@@ -2,11 +2,12 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const vm = require("node:vm");
 const { createBridgeSetupUiLoader } = require("../../app/office/bridgeSetupUiLoader");
 
 function fixture(t) {
-  const parent = path.resolve(__dirname, "../../test-results");
+  const parent = testPath();
   fs.mkdirSync(parent, { recursive: true });
   const directory = fs.mkdtempSync(path.join(parent, "ui-loader-"));
   const filename = path.join(directory, "ui.cjs");

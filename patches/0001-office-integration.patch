@@ -1,0 +1,155 @@
+diff --git a/app/config/options.js b/app/config/options.js
+index 6a1ed714..b1566d7b 100644
+--- a/app/config/options.js
++++ b/app/config/options.js
+@@ -28,6 +28,42 @@
+ const defaults = require("./defaults");
+ 
+ module.exports = {
++      mcp: {
++        default: { enabled: false, files: { enabled: false }, codemirror: { enabled: false }, addin: { enabled: false, port: 39847 }, documentSession: { enabled: false, days: 7 } },
++        describe: "Local MCP access to Office diagnostics, an optional Excel/Word add-in bridge and optional channel file reads and writes. Requires restart.",
++        type: "object",
++        fields: {
++          enabled: {
++            type: "boolean",
++            describe: "Expose MCP tools over a private Unix socket for local agents. Enable addin.enabled for live Excel/Word tools and files.enabled for channel file reads and writes.",
++          },
++          "documentSession.enabled": {
++            type: "boolean",
++            describe: "Opt in to retaining SharePoint document sign-in across app restarts. Adds a local expiry to session-only FedAuth/rtFa cookies (including numbered FedAuth fragments) for exact SharePoint sites opened in Documents, plus the shared sharepoint.com rtFa root cookie. Leaves Microsoft login cookies and unrelated site cookies unchanged. Cookies remain in Electron's normal store; Microsoft can still expire or revoke the session and require sign-in/MFA. Off by default; requires restart.",
++          },
++          "documentSession.days": {
++            type: "number",
++            describe: "Local retention in days for document-session cookies, from 1 to 30; invalid values use 7. Does not extend Microsoft's server-side session validity.",
++          },
++          "codemirror.enabled": {
++            type: "boolean",
++            describe: "Enable experimental live text reads and edits in native SharePoint CodeMirror 6 editors (including Markdown). Requires mcp.enabled and restart; no Office add-in required. Uses version-specific editor handles and native transactions. Save/coauthor compatibility needs live validation. Grants local MCP agents live editor write access.",
++          },
++          "files.enabled": {
++            type: "boolean",
++            describe: "Expose channel file discovery, downloads and uploads using the signed-in Teams session. Requires mcp.enabled and restart. Limited by the existing Microsoft permissions; single-call transfers are capped at 1 MiB; larger files use 640 KiB chunks. Grants local MCP agents file write access. No Office add-in required.",
++          },
++          "addin.enabled": {
++            type: "boolean",
++            describe: "Serve the Office task pane over loopback HTTPS and enable live Excel/Word tools. Requires OpenSSL for local certificate creation and uploading the generated add-in manifest in the corresponding Office application.",
++          },
++          "addin.port": {
++            type: "number",
++            describe: "Loopback HTTPS port for the Office add-ins (1024–65535). Changing it requires uploading the regenerated manifests again.",
++          },
++        },
++        applyMode: "restart",
++      },
+       dbusControl: {
+         default: { enabled: false, busName: "" },
+         describe: "Opt-in Linux user session D-Bus control and observed Teams state. Requires restart.",
+diff --git a/app/index.js b/app/index.js
+index cbe7b2d4..921990be 100644
+--- a/app/index.js
++++ b/app/index.js
+@@ -6,6 +6,7 @@ const {
+   systemPreferences,
+   nativeImage,
+   session,
++  webContents,
+ } = require("electron");
+ const path = require("node:path");
+ const crypto = require("node:crypto");
+@@ -19,6 +20,7 @@ const { registerGraphApiHandlers } = require("./graphApi/ipcHandlers");
+ const { allowedChannels } = require("./security/ipcValidator");
+ const { installIpcSecurity } = require("./security/ipcSecurity");
+ const { installWebviewGuard } = require("./security/webviewGuard");
++const { OfficeMcp } = require("./mcp");
+ const { sanitize: sanitizePii } = require("./utils/logSanitizer");
+ const { isPreLoginAuthNoise, parseChunkLoadFailure, formatChunkLoadWarning } = require("./utils/rendererErrors");
+ const { register: registerGlobalShortcuts, sendKeyboardEventToWindow } = require("./globalShortcuts");
+@@ -182,6 +184,7 @@ const profilesManager = new ProfilesManager(appConfig.settingsStore);
+ // after `mainAppWindow.onAppReady` resolves.
+ let profileViewManager = null;
+ let dbusControlService = null;
++let officeMcp = null;
+ 
+ // ADR-020 Phase 2 unread aggregation; null with the flag off, where the
+ // tray/badge handlers keep their single-sender behaviour.
+@@ -242,6 +245,7 @@ if (gotTheLock) {
+     console.debug("will-quit");
+     teamsStateService?.dispose();
+     teamsControlService?.dispose();
++    void officeMcp?.close();
+     try {
+       dbusControlService?.stop();
+     } catch (error) {
+@@ -799,6 +803,16 @@ async function handleAppReady() {
+ 
+     initializeGraphApiClient();
+     registerGraphApiHandlers(ipcMain, graphApiClient);
++    if (OfficeMcp.isEnabled(config)) {
++      officeMcp = new OfficeMcp({
++        config,
++        userDataPath: app.getPath("userData"),
++        getWebContents: () => webContents.getAllWebContents(),
++        getMainWindow: () => mainAppWindow.getWindow(),
++        graphApiClient,
++      });
++      await officeMcp.start();
++    }
+     if (teamsControlService && config.multiAccount?.enabled) {
+       profilesManager.on("switch", () => setImmediate(() => teamsControlService.refreshState()));
+     }
+@@ -820,6 +834,13 @@ async function handleAppReady() {
+ }
+ 
+ function handleCertificateError(event, webContents, url, error, certificate, callback) {
++  // The MCP add-in host's own loopback certificate. Other certificates
++  // continue through the existing corporate-CA handling.
++  if (officeMcp?.acceptsCertificate(url, error, certificate)) {
++    event.preventDefault();
++    callback(true);
++    return;
++  }
+   certificateModule.onAppCertificateError({
+     event,
+     webContents,
+diff --git a/app/menus/appMenu.js b/app/menus/appMenu.js
+index d5ff2842..971553b9 100644
+--- a/app/menus/appMenu.js
++++ b/app/menus/appMenu.js
+@@ -1,4 +1,4 @@
+-const { shell } = require("electron");
++const { app, shell } = require("electron");
+ const buildProfilesMenu = require("./profilesMenu");
+ const buildThemesMenu = require("./themesMenu");
+ 
+@@ -19,6 +19,9 @@ exports = module.exports = (Menus) => ({
+       label: "Return to Teams",
+       click: () => Menus.returnToTeams(),
+     },
++    ...(process.platform === "linux" && Menus.configGroup.startupConfig.mcp?.enabled
++      ? [{ label: "Documents", click: () => app.emit("office-documents-show") }]
++      : []),
+     ...(Menus.configGroup.startupConfig.quickChat?.enabled
+       ? [
+           {
+diff --git a/app/security/ipcValidator.js b/app/security/ipcValidator.js
+index 843296c0..8248084d 100644
+--- a/app/security/ipcValidator.js
++++ b/app/security/ipcValidator.js
+@@ -16,6 +16,9 @@ const allowedChannels = new Set([
+   'get-config',
+   'get-system-idle-state',
+   'get-app-version',
++  // Local Documents shell only; its handler also checks exact sender/frame.
++  'office-tabs',
++  'office-tabs-state',
+   
+   // Zoom and display controls
+   'get-zoom-level',
+@@ -262,4 +265,4 @@ function isSenderAllowed(channel, event) {
+   }
+ }
+ 
+-module.exports = { validateIpcChannel, isSenderAllowed, allowedChannels, appPageOnlyChannels };
+\ No newline at end of file
++module.exports = { validateIpcChannel, isSenderAllowed, allowedChannels, appPageOnlyChannels };

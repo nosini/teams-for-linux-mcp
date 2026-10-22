@@ -1,10 +1,10 @@
 // Real Chromium native input and cross-origin focus; no real Office/network.
 const { app, BrowserWindow, session, webContents } = require("electron");
-const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const assert = require("node:assert/strict");
 const { executeBridgeSetupStep, inspectBridgeSetup, runBridgeSetup } = require("../../app/office/bridgeSetup");
 
-app.setPath("userData", path.resolve(__dirname, "../../test-results/native-setup-profile"));
+app.setPath("userData", testPath("native-setup-profile"));
 app.disableHardwareAcceleration();
 const timer = setTimeout(() => app.exit(1), 25000);
 

@@ -6,6 +6,7 @@ const { DocumentTabs, documentUrl, allowedNavigation, sourceDocumentUrl } = requ
 const { createOfficeMcpServer } = require("../../app/mcp/server");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { testPath } = require("../fixtures/testPaths");
 const { startLocalEndpoint } = require("../../app/mcp/localEndpoint");
 const { withOfficeClient } = require("../../scripts/diagnoseOfficeMcp");
 
@@ -283,7 +284,7 @@ describe("persistent document tabs", () => {
 
   it("exposes background opening and tab/document state through the real MCP SDK", async (t) => {
     const { tabs } = fixture(t);
-    const root = path.resolve(__dirname, "../../test-results/mcp");
+    const root = testPath("mcp");
     await fs.mkdir(root, { recursive: true });
     const directory = await fs.mkdtemp(path.join(root, "tabs-"));
     const endpoint = await startLocalEndpoint({ directory, createServer: () => createOfficeMcpServer({ listEditors: () => ({ editors: [] }) }, null, null, null, null, tabs) });
