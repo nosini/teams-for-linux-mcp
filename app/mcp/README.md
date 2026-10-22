@@ -25,7 +25,7 @@ through a private Unix socket. Linux only, disabled by default. See the
 - `app/office/bridgeSetupUiLoader.js`: reloads the fixed UI probe after source
   changes in a checkout launch; packaged builds keep normal module caching.
 - `app/office/nativeSetupInput.js`: Chromium activation of a validated named
-  setup control, with native mouse input for Add-ins, Enter for later steps,
+  setup control, with Enter by default and explicit native mouse diagnostics,
   temporary focus emulation and debugger cleanup. `setupMousePoint.js` validates
   frame geometry and `setupMouseSession.js` routes to the selected child frame.
   No remote debugging port or caller-provided keys/coordinates/debugger commands.

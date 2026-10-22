@@ -5,7 +5,8 @@ const { nativeSetupInput } = require("./nativeSetupInput");
 const { setupMousePoint } = require("./setupMousePoint");
 
 function activateSetupControl(contents, frame, command, raw, isCurrent, interaction) {
-  const mouse = interaction === "nativeMouse" || (interaction === "auto" && command.action === "addins");
+  // Real Office accepts Enter while hidden; mouse routing can stall there.
+  const mouse = interaction === "nativeMouse";
   return nativeSetupInput(contents, () => raw({ ...command, type: mouse ? "point" : "focus" }), isCurrent,
     mouse ? (local) => setupMousePoint(contents, frame, local, isCurrent) : undefined, frame);
 }
@@ -96,11 +97,12 @@ async function inspectBridgeSetup(contents) {
 
 // Bounded background job. Progress contains only fixed stage/error names; no
 // document URLs, renderer errors, UI text, file paths or manifest contents.
-async function runBridgeSetup({ contents, manifests, listDocuments, update, signal }, { timeoutMs = 45000, pollMs = 400, settleMs = 800, interaction = "auto" } = {}) {
+async function runBridgeSetup({ contents, manifests, listDocuments, update, signal }, { timeoutMs = 45000, pollMs = 150, interaction = "auto" } = {}) {
+  const started = performance.now();
   const deadline = Date.now() + timeoutMs;
   let editor, editorUrl, application, selectedFrame, submitted = false, stage = "waiting_for_editor";
   const clicked = new Set();
-  const result = (status, code) => ({ status, stage, submitted, ...(code ? { code } : {}) });
+  const result = (status, code) => ({ status, stage, submitted, elapsedMs: Math.round(performance.now() - started), ...(code ? { code } : {}) });
   const report = () => update(result("running"));
   const wait = (ms) => new Promise((resolve) => {
     const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
@@ -143,7 +145,7 @@ async function runBridgeSetup({ contents, manifests, listDocuments, update, sign
           const filled = await evaluate(frame, { type: "fill", manifest: manifests[application] });
           if (!filled.performed) return result("needs_attention", "UPLOAD_INPUT_CHANGED");
           selectedFrame = frame;
-          await wait(settleMs); continue;
+          continue;
         }
         if (selectedFrame !== frame || !probe.expectedFile) return result("needs_attention", "UPLOAD_INPUT_CHANGED");
         if (probe.actions.includes("submit")) {
@@ -151,10 +153,14 @@ async function runBridgeSetup({ contents, manifests, listDocuments, update, sign
           submitted = true; stage = "waiting_for_bridge"; report();
           const uploaded = await evaluate(frame, { type: "click", action: "submit", manifest: manifests[application] });
           if (!uploaded.performed) return result("needs_attention", uploaded.code || "UPLOAD_NOT_SUBMITTED");
-          await wait(settleMs); continue;
+          continue;
         }
+        // The file is selected, but Office may still be enabling Upload.
+        // Keep checking this dialog instead of activating ribbon controls.
+        await wait(pollMs); continue;
       }
-      const priorities = submitted ? ["trust"] : ["trust", "bridge", "uploadEntry", "advanced", "manage", "moreSettings", "moreAddins", "myAddins", "getAddins", "addins", "home", "insert"];
+      const ribbon = probes.some(({ probe }) => probe.homeRequired) ? ["home", "addins", "insert"] : ["addins", "home", "insert"];
+      const priorities = submitted ? ["trust"] : ["trust", "bridge", "uploadEntry", "advanced", "manage", "moreSettings", "moreAddins", "myAddins", "getAddins", ...ribbon];
       let acted = false;
       for (const action of priorities) {
         if (clicked.has(action)) continue;
@@ -164,6 +170,9 @@ async function runBridgeSetup({ contents, manifests, listDocuments, update, sign
         const candidates = probes.filter(({ probe }) => probe.actions.includes(action));
         if (candidates.length > 1) return result("needs_attention", "AMBIGUOUS_CONTROL");
         if (!candidates.length) continue;
+        // Home's ribbon expansion may finish asynchronously. Do not activate
+        // the still-covered Add-ins command or toggle Home a second time.
+        if (action === "addins" && candidates[0].probe.homeRequired && clicked.has("home")) break;
         clicked.add(action); stage = action === "bridge" ? "opening_existing_bridge" : `opening_${action}`; report();
         const clickedResult = await evaluate(candidates[0].frame, { type: "click", action });
         // A collapsed ribbon can leave Add-ins in the DOM underneath the
@@ -184,7 +193,9 @@ async function runBridgeSetup({ contents, manifests, listDocuments, update, sign
         if (!clickedResult.performed) return result("needs_attention", clickedResult.code || "CONTROL_CHANGED");
         acted = true; break;
       }
-      await wait(acted ? settleMs : pollMs);
+      // Dispatch completion is not readiness. Probe immediately; only pause
+      // when the next recognized control or live Bridge is still absent.
+      if (!acted) await wait(pollMs);
     }
     return result("needs_attention", signal.aborted || contents.isDestroyed() ? "CANCELLED" : submitted ? "BRIDGE_NOT_CONNECTED" : "IMPORT_UI_NOT_FOUND");
   } catch {

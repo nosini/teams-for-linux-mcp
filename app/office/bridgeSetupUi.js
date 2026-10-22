@@ -135,7 +135,8 @@ async function bridgeSetupUi(command) {
       })),
     };
   }
-  if (command.type === "probe") return { actions: Object.keys(actions), uploadInput: !!input, expectedFile };
+  if (command.type === "probe") return { actions: Object.keys(actions), uploadInput: !!input, expectedFile,
+    homeRequired: !!actions.home && !!actions.addins && locate(actions.addins).code === "CONTROL_OBSCURED" };
   if (command.type === "fill") {
     if (!input || input.disabled || !/^(excel|word)-addin\.xml$/.test(command.filename)) return { performed: false };
     const transfer = new DataTransfer();
@@ -150,6 +151,13 @@ async function bridgeSetupUi(command) {
   if (command.action === "submit" && await input.files[0].text() !== command.manifest) return { performed: false };
   if (location.href !== command.url || Date.now() >= command.deadline) return { expired: true, performed: false };
   if (["focus", "point"].includes(command.type)) {
+    // A collapsed ribbon leaves the Add-ins command behind the formula bar.
+    // Do not activate it through that obstruction, even with the keyboard.
+    // Missing layout in hidden frames is not itself evidence of an overlay.
+    if (command.type === "focus" && command.action === "addins") {
+      const position = locate(target);
+      if (position.code === "CONTROL_OBSCURED") return position;
+    }
     target.focus({ preventScroll: true });
     let active = document.activeElement;
     while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement;

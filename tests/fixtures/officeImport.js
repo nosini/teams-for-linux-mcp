@@ -38,7 +38,7 @@ function officeImportFixture({ origin, application, file, store = false, panel =
         if (/^(Add-ins|Invoegtoepassingen)$/.test(text)) {
           importAudit.gesture = navigator.userActivation.isActive;
           importAudit.trusted = event.isTrusted;
-          if ((requireTrusted ? !pointer : (!pointer && !event.isTrusted)) || !importAudit.gesture) { importAudit.blocked++; return; }
+          if ((!pointer && !event.isTrusted) || !importAudit.gesture) { importAudit.blocked++; return; }
         }
         pointer = false; fn(event);
       };

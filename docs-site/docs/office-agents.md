@@ -106,7 +106,11 @@ each individual document accepts only one operation at a time.
 
 `office_setup_bridge` takes a `tabId`. It returns immediately while the import
 runs for up to 45 seconds. The tab's `bridgeSetup` reports `running`, `connected`,
-or `needs_attention`, with a fixed stage and an error code when setup stops.
+or `needs_attention`, with a stage, measured `elapsedMs`, and an error code when
+setup stops.
+Elapsed time starts when setup is requested; document loading before that is
+separate. Setup checks the next control immediately after each action and polls
+every 150 ms only while waiting for Office.
 An existing live Bridge needs no import. Repeating the call reuses the same job
 or result, so it cannot accidentally upload twice. After inspecting a stopped
 attempt, `retry: true` starts a new attempt. An upload with an uncertain outcome
@@ -123,9 +127,9 @@ without sending another click.
 and `trust`. The Advanced flow is Add-ins → Advanced → Upload My Add-in →
 select this app's manifest → Upload. File selection supplies the manifest to
 the dialog's file input without opening the native Browse picker.
-The default `auto` interaction uses a native mouse click for Add-ins, then
-Chromium Enter input for the subsequent controls. `nativeMouse` and `native`
-select mouse or Enter explicitly. `pointer` dispatches DOM pointer/mouse events
+The default `auto` interaction uses Chromium Enter for recognized controls.
+`nativeMouse` selects mouse input explicitly; `native` also uses Enter.
+`pointer` dispatches DOM pointer/mouse events
 followed by a click; `click` dispatches the DOM click alone. Native input does
 not show the window or focus it. Automatic setup uses `auto` too.
 It refuses to run alongside automatic setup, and a repeated upload
@@ -143,11 +147,12 @@ Documents window hidden throughout. The new tab remained unselected while a
 previous workbook stayed connected. The agent selected the app's generated
 manifest without a native file picker or user interaction.
 
-The agent expanded Home before setup and recovered an Add-ins mouse-input error
-using native Enter, then resumed automatic setup through Upload and live Bridge
-connection. This verifies the agent-driven flow; the single setup call still
-needs that recovery when native mouse input fails. The test reused an already
-signed-in browser session. A new sign-in may still require user interaction.
+That live test used the earlier mouse-first setup and the agent recovered an
+Add-ins error using native Enter. Automatic setup now uses Enter directly,
+prepares a collapsed Home ribbon, and advances as controls become ready. The
+faster automatic path has passed Electron tests; its fresh-file live timing
+still needs verification. The original test reused an already signed-in browser
+session. A new sign-in may still require user interaction.
 
 In a separate real Excel test, literal writes and formula calculation worked
 with the Documents window hidden. Another open view received the formula and

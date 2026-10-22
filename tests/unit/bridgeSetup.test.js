@@ -10,7 +10,7 @@ function fixture() {
   const options = { contents, manifests: { excel: "EXCEL MANIFEST", word: "WORD MANIFEST" }, signal: controller.signal, listDocuments: async () => ({ documents: [] }), update: (state) => updates.push(state) };
   return { editor, contents, controller, updates, options };
 }
-const timing = { timeoutMs: 100, pollMs: 1, settleMs: 1, interaction: "pointer" };
+const timing = { timeoutMs: 100, pollMs: 1, interaction: "pointer" };
 
 describe("Office Bridge import job", () => {
   it("follows Add-ins, Advanced, Upload My Add-in, manifest selection and Upload in order", async () => {
@@ -26,9 +26,40 @@ describe("Office Bridge import job", () => {
       performed.push(next);
       return { performed: true };
     };
-    const result = await runBridgeSetup(options, timing);
+    const result = await runBridgeSetup(options, { timeoutMs: 200, interaction: "pointer" });
     assert.equal(result.status, "connected");
+    assert.ok(result.elapsedMs < 200, "Ready controls advance without per-step delays");
     assert.deepEqual(performed, actions);
+  });
+
+  it("prepares a collapsed ribbon before sending Add-ins input", async () => {
+    const { editor, options } = fixture();
+    const performed = [];
+    let probes = 0;
+    options.listDocuments = async () => ({ documents: performed.includes("addins") ? [{ webContentsId: 9 }] : [] });
+    editor.executeJavaScript = async (source) => {
+      if (source.includes('"type":"probe"')) return { actions: ["home", "addins"], homeRequired: ++probes < 4 };
+      performed.push(source.includes('"action":"home"') ? "home" : "addins");
+      return { performed: true };
+    };
+    assert.equal((await runBridgeSetup(options, timing)).status, "connected");
+    assert.deepEqual(performed, ["home", "addins"]);
+    assert.equal(probes, 4, "Wait for Home's delayed expansion without toggling it again");
+  });
+
+  it("waits for Upload to enable without touching the ribbon behind its dialog", async () => {
+    const { editor, options } = fixture();
+    let probes = 0, filled = false, uploaded = false;
+    options.listDocuments = async () => ({ documents: uploaded ? [{ webContentsId: 9 }] : [] });
+    editor.executeJavaScript = async (source) => {
+      if (source.includes('"type":"probe"')) return { uploadInput: true, expectedFile: filled,
+        actions: ++probes >= 4 ? ["submit", "addins", "home"] : ["addins", "home"] };
+      if (source.includes('"type":"fill"')) filled = true;
+      else { assert.ok(source.includes('"action":"submit"'), "Do not act outside the pending upload dialog"); uploaded = true; }
+      return { performed: true };
+    };
+    assert.equal((await runBridgeSetup(options, timing)).status, "connected");
+    assert.equal(probes, 4);
   });
 
   it("grants gestures only to named UI actions and keeps single-step probes passive", async () => {
@@ -112,7 +143,9 @@ describe("Office Bridge import job", () => {
     const { editor, options } = fixture();
     editor.executeJavaScript = () => assert.fail("Existing connections need no UI automation");
     options.listDocuments = async () => ({ documents: [{ webContentsId: 9 }] });
-    assert.deepEqual(await runBridgeSetup(options, timing), { status: "connected", stage: "connected", submitted: false });
+    const result = await runBridgeSetup(options, timing);
+    assert.ok(Number.isInteger(result.elapsedMs) && result.elapsedMs >= 0);
+    assert.deepEqual(result, { status: "connected", stage: "connected", submitted: false, elapsedMs: result.elapsedMs });
   });
 
   it("reports sign-in without touching authentication controls", async () => {

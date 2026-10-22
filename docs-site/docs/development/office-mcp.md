@@ -133,11 +133,24 @@ write/read/clear succeeded hidden; concurrent discovery in the previously open
 workbook also succeeded. The window stayed hidden and its selected tab never
 changed. No user interaction was requested.
 
-This verifies the agent-driven flow with an already signed-in browser session.
-It does not establish cold sign-in or reliable completion from a single setup
-call: the agent supplied Home and the Enter recovery separately. The actual
-Excel button accepting Enter also means a pointer-only fixture does not prove
-that Microsoft's UI requires mouse input.
+This verifies the agent-driven flow with an already signed-in browser session;
+cold sign-in remains untested. Automatic setup now uses native Enter directly,
+matching the successful real input path. The fixture accepts native Enter;
+its separate pointer-only case tests explicit mouse capability rather than
+assuming Microsoft requires pointer input.
+
+Setup no longer sleeps for 800 ms after every action. It probes immediately,
+pausing for 150 ms only when waiting for a menu, an enabled Upload control or
+a live Bridge. Selecting a manifest keeps the job inside the upload dialog
+until submission is ready. Delayed controls do not cause duplicate dispatch,
+ribbon switching or a second Upload. Each progress/result includes monotonic
+`elapsedMs` from the start of that setup job, separate from document loading.
+
+A before/after run of the same three-document Electron import fixture measured
+7,352 ms before these changes and 1,839 ms afterward. These are simulated Office
+hosts with a 1,200 ms menu delay; they measure the orchestration overhead and do
+not predict Microsoft's network or workbook load time. Fresh-file live timing
+of this optimized automatic path remains unverified.
 
 Live diagnosis found two UI differences now covered by the Electron fixture:
 Office renders the visible Add-ins menu beneath `visibility:hidden` portal
@@ -147,8 +160,10 @@ The upload dialog uses `<input type="button" value="Upload">`; setup recognizes
 button/submit input values as labels, without reading file/text input values.
 Inspection includes recognized submit and consent actions after resolving their
 dialogs. A collapsed ribbon also left Add-ins underneath the formula bar;
-automatic setup expands Home once after an obscured Add-ins preflight and
-revalidates before trying again. It never bypasses the hit test.
+automatic setup detects that obstruction in its probe, expands Home once,
+and waits for the command to become reachable. A failed input preflight can
+also trigger this preparation if the layout changed after the probe. It never
+bypasses the hit test.
 
 `office_inspect_bridge_setup` reports frame origins, eligibility and up to 240
 controls across the selected editor's allowed descendants. It omits document,
@@ -165,8 +180,7 @@ a repeated submission unless `retry: true` explicitly requests it. Dispatch is
 not UI-success confirmation. Inspect after each step when debugging live UI.
 
 Automatic setup uses `nativeSetupInput.js`: the validated named control is
-focused, then Add-ins receives a native mouse click and later controls receive
-a fixed Enter key press through Electron's
+focused, then receives a fixed Enter key press through Electron's
 in-process Debugger API. This produces trusted browser activation without
 showing the tab or focusing its native window. No remote debugging port is
 opened. The operation refuses an existing debugger, checks the document again
@@ -175,6 +189,7 @@ emulation and detaches after each action. Losing debugger ownership stops input
 without detaching another session. No caller CDP command or key is accepted.
 Read-only diagnostics remain passive; file selection still supplies only the
 app's generated manifest to the upload input.
+Explicit `nativeMouse` mode remains available for diagnostics.
 `setupMousePoint.js` validates the target's visible rectangle and hit tests each
 parent frame, rejecting overlays, ambiguous owners and rotated/skewed frames.
 `setupMouseSession.js` routes through one matching descendant Chromium session

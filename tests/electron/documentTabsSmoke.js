@@ -74,6 +74,7 @@ app.whenReady().then(async () => {
       return response.structuredContent;
     };
     const ids = [];
+    let setupStarted;
     const { editors } = await call("office_list_editors");
     const embedded = editors.find((editor) => editor.application === "excel" && editor.webContentsId === main.webContents.id);
     assert.ok(embedded, "The live-style embedding should expose an Office editor");
@@ -101,11 +102,7 @@ app.whenReady().then(async () => {
       assert.doesNotMatch(JSON.stringify(inspection.structuredContent), /private cell|private document|private input|taskpane\.html|file=/);
       assert.equal((await call("office_list_tabs")).visible, false);
       assert.equal((await call("office_list_tabs")).selectedTabId, selected);
-      assert.equal((await call("office_bridge_setup_step", { tabId: ids[0], action: "home", interaction: testingNative ? "auto" : "pointer" })).performed, true);
-      assert.equal((await call("office_bridge_setup_step", { tabId: ids[0], action: "addins", interaction: "click" })).performed, true);
-      const afterClick = await call("office_inspect_bridge_setup", { tabId: ids[0] });
-      assert.ok(afterClick.frames.some((frame) => frame.actions?.includes("addins")), "Click-only must leave the fixture's pointer-sensitive menu closed");
-      assert.equal((await call("office_bridge_setup_step", { tabId: ids[0], action: "addins", interaction: testingNative ? "nativeMouse" : "pointer" })).performed, true);
+      setupStarted = performance.now();
       const started = await Promise.all(ids.map((tabId) => call("office_setup_bridge", { tabId, retry: true })));
       assert.ok(started.every((result) => result.bridgeSetup.status === "running"));
       const repeated = await call("office_setup_bridge", { tabId: ids[0] });
@@ -131,6 +128,7 @@ app.whenReady().then(async () => {
     assert.equal(listing.tabs.filter((tab) => tab.connected).length, 3, JSON.stringify(listing));
     assert.equal(listing.visible, false);
     if (testingSetup) {
+      console.log(`Bridge import timing (three simulated Office documents): ${Math.round(performance.now() - setupStarted)} ms`);
       for (const tab of listing.tabs) {
         const contents = webContents.fromId(tab.webContentsId);
         const inspection = await call("office_inspect_bridge_setup", { tabId: tab.id });
@@ -148,7 +146,7 @@ app.whenReady().then(async () => {
         const sourceAudit = await editor.executeJavaScript("importAudit");
         assert.equal(sourceAudit.advanced, 1, "Advanced must be activated before opening the upload window");
         assert.equal(sourceAudit.gesture, true, "Authorized setup commands must have browser user activation");
-        assert.equal(sourceAudit.blocked, tab.id === ids[0] ? 1 : 0);
+        assert.equal(sourceAudit.blocked, 0);
         if (testingNative) assert.equal(sourceAudit.trusted, true, "Native activation must produce trusted click events");
         assert.equal(contents.debugger.isAttached(), false);
       }

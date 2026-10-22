@@ -2,7 +2,7 @@
 const { app, BrowserWindow, session, webContents } = require("electron");
 const path = require("node:path");
 const assert = require("node:assert/strict");
-const { executeBridgeSetupStep, inspectBridgeSetup } = require("../../app/office/bridgeSetup");
+const { executeBridgeSetupStep, inspectBridgeSetup, runBridgeSetup } = require("../../app/office/bridgeSetup");
 
 app.setPath("userData", path.resolve(__dirname, "../../test-results/native-setup-profile"));
 app.disableHardwareAcceleration();
@@ -41,7 +41,7 @@ app.whenReady().then(async () => {
     }
     assert.equal((await editor.executeJavaScript("audit")).opened, 0, "DOM events must not be mistaken for native input");
     const focusedWindow = BrowserWindow.getFocusedWindow();
-    const native = await executeBridgeSetupStep(window.webContents, manifests, "addins", "native");
+    const native = await executeBridgeSetupStep(window.webContents, manifests, "addins", "auto");
     assert.equal(native.performed, true, JSON.stringify(native));
     await new Promise((resolve) => setTimeout(resolve, 100));
     const audit = await editor.executeJavaScript("audit");
@@ -87,7 +87,7 @@ app.whenReady().then(async () => {
     const partial = partialInspection.frames.flatMap((frame) => frame.actionability || []).find((item) => item.action === "addins");
     assert.equal(partial.centreRelation, "other");
     assert.ok(["target", "descendant"].includes(partial.relation));
-    assert.equal((await executeBridgeSetupStep(window.webContents, manifests, "addins", "auto")).performed, true);
+    assert.equal((await executeBridgeSetupStep(window.webContents, manifests, "addins", "nativeMouse")).performed, true);
     assert.equal((await editor.executeJavaScript("mouseAudit")).opened, 2, "Click only an uncovered point that hits the same named button");
     await editor.executeJavaScript("document.getElementById('partial').remove()");
     for (const zoom of [0.75, 1.25, 2]) {
@@ -134,6 +134,19 @@ app.whenReady().then(async () => {
     await editor.executeJavaScript(`document.getElementById('menu').style.display = ''; document.getElementById('menu').style.visibility = ''`);
     await editor.executeJavaScript("document.getElementById('menu').hidden = true");
     assert.equal((await executeBridgeSetupStep(window.webContents, manifests, "advanced", "native")).code, "CONTROL_NOT_FOUND");
+    await editor.executeJavaScript(`
+      document.body.innerHTML = '<button id="home" role="tab">Home</button><button id="addins">Add-ins</button><div id="cover"></div>';
+      const ribbonRect = document.getElementById('addins').getBoundingClientRect();
+      document.getElementById('cover').style.cssText = 'position:absolute;z-index:1000;left:' + ribbonRect.left + 'px;top:' + ribbonRect.top + 'px;width:' + ribbonRect.width + 'px;height:' + ribbonRect.height + 'px';
+      globalThis.prepared = [];
+      document.getElementById('home').onclick = () => { prepared.push('home'); setTimeout(() => document.getElementById('cover').remove(), 75); };
+      document.getElementById('addins').onclick = event => { if (event.isTrusted) prepared.push('addins'); };
+    `);
+    assert.equal((await executeBridgeSetupStep(window.webContents, manifests, "addins", "auto")).code, "CONTROL_OBSCURED", "Keyboard default must not activate an obscured ribbon command");
+    const prepared = await runBridgeSetup({ contents: window.webContents, manifests, signal: new AbortController().signal,
+      update() {}, listDocuments: async () => ({ documents: await editor.executeJavaScript("prepared.includes('addins')") ? [{ webContentsId: window.webContents.id }] : [] }) });
+    assert.equal(prepared.status, "connected");
+    assert.deepEqual(await editor.executeJavaScript("prepared"), ["home", "addins"], "Automatic setup expands a collapsed ribbon once and waits until Add-ins is reachable");
     assert.equal(window.isVisible(), false);
     assert.equal(BrowserWindow.getFocusedWindow(), focusedWindow);
     assert.equal(webContents.getFocusedWebContents(), focusedContents);
