@@ -33,5 +33,7 @@ describe("MCP tool helpers", () => {
     await assert.rejects(evaluateInFrame(frame(new Promise(() => {})), "stall()", 10, "Timed out"), { message: "Timed out" });
     await assert.rejects(evaluateInFrame(frame(Promise.reject(new Error("renderer"))), "fail()", 1000, "Timed out"), { message: "renderer" });
     assert.deepEqual(gestures, [false, false, false]);
+    assert.equal(await evaluateInFrame(frame(Promise.resolve(4)), "authorized UI action", 1000, "Timed out", true), 4);
+    assert.equal(gestures.at(-1), true);
   });
 });

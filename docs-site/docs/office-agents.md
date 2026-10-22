@@ -32,6 +32,16 @@ paths when you have a custom profile.
 
 ## Open the add-in
 
+In a Documents tab, choose **Connect Bridge** to import the matching add-in
+through Office's menus. Agents can do the same with `office_setup_bridge` while
+the window stays hidden. This uses the app's own manifest; it does not need
+admin deployment when your organization already allows manual add-in uploads.
+The automation recognizes English and Dutch add-in controls. If setup stops,
+finish sign-in or use the manual steps below. The first live Microsoft import
+test loaded Excel after sign-in, but stopped after selecting Insert because the
+add-in controls were not recognized. No upload was attempted. Automatic import
+is not yet verified against that UI; the passing tests use a simulated UI.
+
 Open a document using **Edit in Teams**. In Office's **Add-ins** menu, choose
 **Upload My Add-in** and select the manifest printed at startup:
 
@@ -46,6 +56,112 @@ The pane runs inside Teams for Linux. A separate browser does not inherit the
 client's trust for the local HTTPS certificate and may show an add-in startup
 error. Other editors can close that pane and coauthor normally in their browser;
 they do not need the bridge installed or working there.
+
+## Keep multiple documents open
+
+With MCP enabled, choose **Documents** from the Teams for Linux menu. This
+opens a separate window with persistent document tabs. Paste an Excel or Word
+SharePoint link and choose **Open tab**, or open a file in Teams first and
+choose **Open current file** in Documents. Each tab is an independent Office
+page, so opening another file in the main Teams window no longer unloads it.
+Up to 16 tabs can stay open. Tabs are kept for this app run; they are not
+restored after quitting Teams.
+
+Choose **Connect Bridge**, or open the **Teams Office Bridge** add-in manually
+in each tab, and wait for the window to say **Bridge connected**. A page being
+loaded does not establish agent access. Opening a URL alone does not install
+the add-in. The setup operation imports it through Office's UI without showing
+the tab. Tenant restrictions still apply, and sign-in may need your interaction.
+
+Use **Hide window**, or close the Documents window, to keep working in Teams
+while the agent edits. Both actions keep all tabs running. To unload a document,
+close its individual tab. Closing a tab does not itself confirm Office has
+saved changes; finish saving first. Quitting Teams ends every tab and bridge.
+Background tabs still use memory and CPU, and need a running Teams app and
+network connection. Your ordinary browser's tabs are separate from these.
+
+Agents can use these additional tools:
+
+| Tool | Purpose |
+| --- | --- |
+| `office_open_document` | Open a document in a background tab by default; leaves your main Teams page and selected tab alone. |
+| `office_list_tabs` | Check loading state and discover connected Office document IDs for each tab. |
+| `office_setup_bridge` | Start Bridge import in a hidden tab; poll `office_list_tabs` for setup progress and the connected document ID. |
+| `office_inspect_bridge_setup` | Read bounded Office control names and frame origins to diagnose an import that stopped. Leaves the tab hidden and unchanged. |
+| `office_bridge_setup_step` | Perform one named add-in setup action after inspection, without showing the tab. |
+| `office_show_tab` | Show a tab for inspection or sign-in/add-in setup when requested. |
+| `office_hide_tabs` | Hide the Documents window without closing any documents. |
+| `office_close_tab` | Request closing a specific tab, allowing Office to prevent unloading. |
+
+`office_open_document` accepts either a SharePoint file URL or a current Excel,
+Word or document-wrapper `editorId` from `office_list_editors`. Embedded editors
+resolve through their own SharePoint or Microsoft 365 container, including
+layouts without any SharePoint wrapper frame. If an editor cannot be reopened,
+`unavailableSources` reports its ancestor origins without document URLs or query
+strings. A pasted URL uses the main Teams
+account's session. An editor ID uses that editor's account. It returns a tab ID;
+use `office_list_tabs` to obtain its connected document ID before calling Excel
+or Word tools. An agent can run operations on different documents concurrently;
+each individual document accepts only one operation at a time.
+
+`office_setup_bridge` takes a `tabId`. It returns immediately while the import
+runs for up to 45 seconds. The tab's `bridgeSetup` reports `running`, `connected`,
+or `needs_attention`, with a fixed stage and an error code when setup stops.
+An existing live Bridge needs no import. Repeating the call reuses the same job
+or result, so it cannot accidentally upload twice. After inspecting a stopped
+attempt, `retry: true` starts a new attempt. An upload with an uncertain outcome
+is never retried automatically. Only a live connected document ID permits edits.
+If import reports `IMPORT_UI_NOT_FOUND`, `office_inspect_bridge_setup` can show
+the current Office control names without clicking anything or returning document
+bodies, input values or full URLs. Control names are untrusted UI data.
+Diagnostics also report the Documents window's visibility, minimization and focus
+state, plus button dimensions, clipping and the hit element's tag/role. Blocker
+text and identifiers are excluded. This helps investigate `CONTROL_OBSCURED`
+without sending another click.
+`office_bridge_setup_step` accepts only named setup actions such as `home`,
+`addins`, `advanced`, `moreSettings`, `uploadEntry`, `selectManifest`, `submit`
+and `trust`. The Advanced flow is Add-ins → Advanced → Upload My Add-in →
+select this app's manifest → Upload. File selection supplies the manifest to
+the dialog's file input without opening the native Browse picker.
+The default `auto` interaction uses a native mouse click for Add-ins, then
+Chromium Enter input for the subsequent controls. `nativeMouse` and `native`
+select mouse or Enter explicitly. `pointer` dispatches DOM pointer/mouse events
+followed by a click; `click` dispatches the DOM click alone. Native input does
+not show the window or focus it. Automatic setup uses `auto` too.
+It refuses to run alongside automatic setup, and a repeated upload
+requires an explicit retry after inspecting the result. `performed: true`
+confirms dispatch only; inspect the resulting UI or connected document afterward.
+
+Document pages share their account's signed-in session but do not receive the
+Teams preload or the local Documents window's controls. Tabs only accept
+recognized SharePoint/Office document links. Unrelated top-level navigation
+and popups are blocked; finish any additional authentication in Teams if needed.
+
+Opening a fresh SharePoint Excel workbook, importing its Bridge for the first
+time, and a temporary formula write/read/clear have now been verified with the
+Documents window hidden throughout. The new tab remained unselected while a
+previous workbook stayed connected. The agent selected the app's generated
+manifest without a native file picker or user interaction.
+
+The agent expanded Home before setup and recovered an Add-ins mouse-input error
+using native Enter, then resumed automatic setup through Upload and live Bridge
+connection. This verifies the agent-driven flow; the single setup call still
+needs that recovery when native mouse input fails. The test reused an already
+signed-in browser session. A new sign-in may still require user interaction.
+
+In a separate real Excel test, literal writes and formula calculation worked
+with the Documents window hidden. Another open view received the formula and
+its result, then the cleared test cell. Reopening that configured workbook in
+a fresh hidden tab restored its existing Bridge. Authentication and first-time
+add-in setup are separate requirements for fully unattended opening.
+Copying a Teams Microsoft 365 container alone did not reopen the workbook in
+that test, so use the actual file link when needed.
+
+The tab manager has also been tested in Electron with two Excel documents and
+one Word document using simulated Office.js hosts, including parallel edits,
+showing/hiding the window, and closing one tab without unloading the others.
+Real Word background editing and simultaneous editing of multiple real files
+remain unverified.
 
 ## Connect a local agent
 

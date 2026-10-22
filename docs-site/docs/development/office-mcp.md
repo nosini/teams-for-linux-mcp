@@ -62,6 +62,162 @@ replaces a pair that is missing, mismatched, readable by others or within a day
 of expiry. If the add-in host cannot start, the live Office tools are absent
 and the other MCP tools still start.
 
+## Persistent background documents
+
+`OfficeMcp` also owns `DocumentTabs` when a main Teams window is available.
+Its separate local shell hosts up to 16 `WebContentsView` document pages. The
+shell has its own sandboxed preload; document pages have no preload, use
+`sandbox: true` and `contextIsolation: true`, and share the source Teams session.
+`backgroundThrottling: false` keeps Office commands active while the window is
+hidden or another tab is selected. It does not establish an Office connection:
+readiness comes only from `LiveOfficeBridge` discovery in that view.
+
+The `office-tabs` IPC handler validates the exact shell webContents, top frame
+and local page URL. Its main-process manager performs the same URL validation
+for UI and MCP opens. Renderer exceptions, full document URLs and signed query
+strings are not returned in tab metadata. Top-level navigation is restricted
+to the original document origin and supported Microsoft Office/login hosts;
+popups are denied. Closing the shell hides it; explicit individual closes honor
+before-unload protection. App shutdown disposes every renderer and IPC handler.
+
+`tests/electron/documentTabsSmoke.js` exercises the actual startup module, MCP
+tools, shell IPC, hidden/inactive Office views and cross-document edits with
+simulated Office.js. It does not establish Microsoft add-in reopening behavior
+or successful cloud saves. The user guide describes these live-test limits.
+
+### First-time Bridge import
+
+`office_setup_bridge(tabId, retry=false)` runs `bridgeSetup.js` in the background
+for up to 45 seconds. `office_list_tabs` exposes its fixed progress stages and
+error codes in each tab's `bridgeSetup`. Repeated calls reuse a job/result;
+`retry: true` explicitly starts another stopped attempt. Closing a tab or quitting
+cancels its job. Main-frame navigation cancels setup once it has started using
+the editor. An existing live Bridge completes without changing add-in setup.
+
+The add-in host provides the exact generated Excel and Word manifest strings
+to the tab manager. The agent cannot supply a path, manifest, JavaScript or DOM
+selector. `bridgeSetupUi.js` operates on named English/Dutch add-in controls in
+one Office editor and allowlisted descendant Office/store frames. It opens
+the add-in menu, recognizes Advanced/Geavanceerd and opens Upload My Add-in,
+then assigns a `File` through `DataTransfer` to
+the dialog's file input, then clicks Upload. It never opens a native file picker.
+Before submission, the selected file's contents must match this app's manifest.
+Only an add-in consent dialog identifying Teams Office Bridge may be accepted.
+Sign-in is not automated; unknown or ambiguous controls stop setup.
+Named-control inspection and actions traverse up to 32 open shadow roots,
+excluding document, grid and editable surfaces through shadow ancestors.
+Native focus validation follows shadow-root active elements. Closed components
+remain unsupported; reaching the scan limit stops actions instead of acting
+on an incomplete set of controls.
+
+The job dispatches Upload at most once. After a timeout or uncertain result,
+inspect the live tab before explicitly retrying. Uploading successfully is not
+readiness: only `LiveOfficeBridge` discovery in that tab completes setup. No
+document content or private Office APIs are used by the import operation;
+Office may persist the add-in configuration in the document.
+
+Run the Electron fixture with `DOCUMENT_TABS_SETUP=1` to exercise first-time
+import, application-specific manifests, hidden cross-origin dialogs, English
+and Dutch controls, stale file replacement, duplicate calls and subsequent
+Excel/Word access. Both its import UI and Office.js are simulated. A live test
+must use a document with no previous Bridge setup; a new tab of an already
+configured file is not evidence of first-time setup.
+
+A fresh real SharePoint Excel workbook loaded in a hidden, nonselected tab.
+The agent expanded Home, then automatic setup stopped at Add-ins with
+`SETUP_UI_UNAVAILABLE`; a second mouse step also failed. Native Enter opened
+the actual Add-ins menu while hidden. After inspecting that menu, the agent
+resumed automatic setup, which selected the manifest, submitted once and
+reported `connected_after_upload`. Worksheet discovery and a temporary formula
+write/read/clear succeeded hidden; concurrent discovery in the previously open
+workbook also succeeded. The window stayed hidden and its selected tab never
+changed. No user interaction was requested.
+
+This verifies the agent-driven flow with an already signed-in browser session.
+It does not establish cold sign-in or reliable completion from a single setup
+call: the agent supplied Home and the Enter recovery separately. The actual
+Excel button accepting Enter also means a pointer-only fixture does not prove
+that Microsoft's UI requires mouse input.
+
+Live diagnosis found two UI differences now covered by the Electron fixture:
+Office renders the visible Add-ins menu beneath `visibility:hidden` portal
+containers, with `visibility:visible` on descendants. Visibility checks must use
+the control's computed visibility and still reject any `display:none` ancestor.
+The upload dialog uses `<input type="button" value="Upload">`; setup recognizes
+button/submit input values as labels, without reading file/text input values.
+Inspection includes recognized submit and consent actions after resolving their
+dialogs. A collapsed ribbon also left Add-ins underneath the formula bar;
+automatic setup expands Home once after an obscured Add-ins preflight and
+revalidates before trying again. It never bypasses the hit test.
+
+`office_inspect_bridge_setup` reports frame origins, eligibility and up to 240
+controls across the selected editor's allowed descendants. It omits document,
+grid and editable content, text/file input values, HTML and full URLs. No caller
+script or selector is accepted. Inspection does not click controls or change
+visibility; names remain untrusted UI data.
+
+`office_bridge_setup_step` executes one named action with the same frame,
+manifest and consent checks. It accepts `auto` (default), `pointer`, `click`,
+`native` (Enter) or `nativeMouse` interaction modes,
+but no caller scripts, selectors, keys, coordinates or file paths. A tab serializes
+steps with automatic jobs, records upload attempts before dispatch, and rejects
+a repeated submission unless `retry: true` explicitly requests it. Dispatch is
+not UI-success confirmation. Inspect after each step when debugging live UI.
+
+Automatic setup uses `nativeSetupInput.js`: the validated named control is
+focused, then Add-ins receives a native mouse click and later controls receive
+a fixed Enter key press through Electron's
+in-process Debugger API. This produces trusted browser activation without
+showing the tab or focusing its native window. No remote debugging port is
+opened. The operation refuses an existing debugger, checks the document again
+before input, temporarily emulates page focus, releases pressed input, restores focus
+emulation and detaches after each action. Losing debugger ownership stops input
+without detaching another session. No caller CDP command or key is accepted.
+Read-only diagnostics remain passive; file selection still supplies only the
+app's generated manifest to the upload input.
+`setupMousePoint.js` validates the target's visible rectangle and hit tests each
+parent frame, rejecting overlays, ambiguous owners and rotated/skewed frames.
+`setupMouseSession.js` routes through one matching descendant Chromium session
+for a frame in another renderer process. Without this routing, native mouse
+input did not reach nonselected/cross-origin frames in the fixture. Session
+discovery is bounded and all owned sessions end with the root debugger detach.
+No caller coordinate, target ID, selector or protocol command is accepted.
+
+`tests/electron/nativeSetupInputSmoke.js` verifies that DOM click/pointer events
+are untrusted and that native activation produces a trusted click in a hidden
+cross-origin frame, preserves native window focus and releases its debugger.
+Run `documentTabsSmoke.js` with `DOCUMENT_TABS_SETUP=1 DOCUMENT_TABS_NATIVE=1`
+to require trusted clicks throughout its representative import flow. Both
+fixtures pass. The full import fixture covers visible menus overriding hidden
+portal ancestors, legacy Upload input buttons, exact manifest selection, one
+submission, and two Excel documents plus one Word document. Its UI and Office.js
+are simulated; the separate live Excel check establishes actual import/read
+behavior only for the tested workbook.
+
+Setup permits `res.public.onecdn.static.microsoft` only within the selected
+editor's descendants. Sibling frames, lookalike hosts and other hosts under the
+CDN domain remain excluded. The Office host creates the Bridge task pane.
+Read-only inspection exposes up to 40 named-control hit-test records across all
+frames: target/descendant/ancestor/other/no-hit classification, hit element
+tag/role, target pointer-events, dimensions and clipping. It omits blocker text,
+identifiers, HTML, input values and coordinates. Document-tab inspection also
+reports native window visibility, minimization, focus and tab selection. These
+diagnostics do not relax the mouse hit test.
+The point check tries the centre and four interior points, selecting only a
+point whose hit is the named control or its descendant. Diagnostics retain the
+centre relation separately. A full overlay still prevents input.
+
+When running a checkout with Electron (`process.defaultApp === true`),
+`bridgeSetupUiLoader.js` reloads the fixed local `bridgeSetupUi.js` module when
+its file changes. This lets UI-probe corrections take effect without restarting
+the app after the loader itself is installed. It cannot reload arbitrary caller
+source or paths. Packaged builds keep the cached module; main-process changes
+still require a restart. Invalid development changes stop setup and can be
+repaired for the next inspection. `uiProbeReloadSmoke.js` verifies this in one
+hidden Electron process without restarting.
+Capture/visibility changes and mouse-only activation for every step
+were explored but are not part of the implementation.
+
 ## Live Excel tools
 
 | Tool | Purpose |

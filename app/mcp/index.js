@@ -11,6 +11,7 @@ class OfficeMcp {
   #graphApiClient;
   #addinHost = null;
   #endpoint = null;
+  #documentTabs = null;
   #closed = false;
 
   constructor({ config, userDataPath, getWebContents, getMainWindow, graphApiClient = null }) {
@@ -36,6 +37,10 @@ class OfficeMcp {
       const surfaceInspector = new SurfaceInspector(this.#getWebContents);
       const liveBridge = mcp.addin?.enabled === true ? await this.#startAddin(mcp.addin) : null;
       if (this.#closed) return;
+      if (this.#getMainWindow()) {
+        const { DocumentTabs } = require("../office/documentTabs");
+        this.#documentTabs = new DocumentTabs({ getMainWindow: this.#getMainWindow, inspector, liveBridge, manifests: this.#addinHost?.manifests });
+      }
       let channelFiles = null;
       if (mcp.files?.enabled === true) {
         const { ChannelFiles } = require("./channelFiles");
@@ -48,7 +53,7 @@ class OfficeMcp {
       }
       const endpoint = await startLocalEndpoint({
         directory: this.#directory,
-        createServer: () => createOfficeMcpServer(inspector, liveBridge, channelFiles, surfaceInspector, codeMirrorBridge),
+        createServer: () => createOfficeMcpServer(inspector, liveBridge, channelFiles, surfaceInspector, codeMirrorBridge, this.#documentTabs),
       });
       if (this.#closed) {
         await endpoint.close();
@@ -106,6 +111,8 @@ class OfficeMcp {
 
   async close() {
     this.#closed = true;
+    this.#documentTabs?.close();
+    this.#documentTabs = null;
     const endpoint = this.#endpoint, addinHost = this.#addinHost;
     this.#endpoint = null;
     this.#addinHost = null;

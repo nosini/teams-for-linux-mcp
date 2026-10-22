@@ -99,6 +99,7 @@ async function startAddinHost({ directory, port = 39847 }) {
   origin = `https://127.0.0.1:${server.address().port}`;
   const manifestPath = path.join(directory, "excel-addin.xml");
   const wordManifestPath = path.join(directory, "word-addin.xml");
+  const manifests = Object.freeze({ excel: createManifest(origin), word: createManifest(origin, "word") });
   let closing;
   const close = () => {
     if (!closing) {
@@ -108,12 +109,12 @@ async function startAddinHost({ directory, port = 39847 }) {
     return closing;
   };
   try {
-    await fs.writeFile(manifestPath, createManifest(origin), { mode: 0o600 });
-    await fs.writeFile(wordManifestPath, createManifest(origin, "word"), { mode: 0o600 });
+    await fs.writeFile(manifestPath, manifests.excel, { mode: 0o600 });
+    await fs.writeFile(wordManifestPath, manifests.word, { mode: 0o600 });
   } catch (error) { await close(); throw error; }
   server.on("error", () => {});
   return {
-    origin, manifestPath, wordManifestPath, close,
+    origin, manifestPath, wordManifestPath, manifests, close,
     acceptsCertificate(url, error, peer) {
       try {
         const candidate = new X509Certificate(peer.data);

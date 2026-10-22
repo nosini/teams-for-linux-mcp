@@ -16,6 +16,9 @@ const allowedChannels = new Set([
   'get-config',
   'get-system-idle-state',
   'get-app-version',
+  // Local Documents shell only; its handler also checks exact sender/frame.
+  'office-tabs',
+  'office-tabs-state',
   
   // Zoom and display controls
   'get-zoom-level',

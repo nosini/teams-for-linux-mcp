@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+<title>Documents — Teams Office</title><link rel="stylesheet" href="style.css"></head>
+<body><header>
+<div class="toolbar"><strong>Documents</strong><form id="open"><input id="url" type="url" aria-label="SharePoint document link" placeholder="Paste an Excel or Word SharePoint link" required><button>Open tab</button></form><select id="sources" aria-label="Current Teams documents"></select><button id="capture" type="button">Open current file</button><button id="hide" type="button">Hide window</button></div>
+<nav id="tabs" aria-label="Documents"></nav>
+<div class="connection"><button id="setup" type="button" disabled>Connect Bridge</button><p id="status" role="status">Open a document to get started. Closing this window keeps your tabs running.</p></div>
+</header><main><h1>Your documents, side by side in tabs</h1><p>Open files here to keep them available while you use Teams.</p><p>You can hide this window while an agent works. Use the Teams menu’s Documents entry to return.</p><p>Each document needs its Teams Office Bridge add-in running before an agent can edit it.</p></main>
+<script src="renderer.js"></script></body></html>

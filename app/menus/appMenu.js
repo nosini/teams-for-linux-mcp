@@ -1,4 +1,4 @@
-const { shell } = require("electron");
+const { app, shell } = require("electron");
 const buildProfilesMenu = require("./profilesMenu");
 const buildThemesMenu = require("./themesMenu");
 
@@ -19,6 +19,9 @@ exports = module.exports = (Menus) => ({
       label: "Return to Teams",
       click: () => Menus.returnToTeams(),
     },
+    ...(process.platform === "linux" && Menus.configGroup.startupConfig.mcp?.enabled
+      ? [{ label: "Documents", click: () => app.emit("office-documents-show") }]
+      : []),
     ...(Menus.configGroup.startupConfig.quickChat?.enabled
       ? [
           {
