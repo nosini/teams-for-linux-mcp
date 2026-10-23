@@ -464,6 +464,26 @@ tools do not require an add-in or `graphApi.enabled`. Reconnect your agent after
 restarting Teams; container agents need their socket bind recreated as described
 above. An installed Flatpak must first be rebuilt with this version of the code.
 
+Check the agent's current tool catalog before planning a file transfer. The
+Office tools `office_list_location_files` and `office_resolve_location` discover
+folders and files, but cannot upload arbitrary files. If `teams_create_file`,
+`teams_replace_file` and the chunked upload tools are absent, this session has
+no Teams file-upload capability, even though the source code implements it.
+Check the running build, the separate `mcp.files.enabled` setting and catalog
+refresh; absence alone does not identify which of these is responsible.
+The separate CodeMirror opt-in edits an open Markdown document and does not
+provide uploads of new files. Do not enable settings or restart the client
+implicitly to work around a missing tool.
+
+In a live session on 23 October 2026, only the Office and read-only editor
+inspection tools were exposed. Markdown upload therefore required a host-side
+rclone transfer. A separate SharePoint connector also rejected discovered
+browser URLs with HTTP 400 `Invalid shares key`; that did not establish that
+the Teams account lacked file-write permission. Follow-up work is to identify
+why the existing transfer tools were not exposed in that session, verify
+uploads to a discovered SharePoint folder, and document the working setup.
+This is distinct from worksheet layout features that still need implementing.
+
 Ask the agent to list teams, list a team's channels, resolve a channel's Files
 folder, and list its files. The tools are `teams_list_teams`,
 `teams_list_channels`, `teams_get_channel_folder`, `teams_list_files`,
