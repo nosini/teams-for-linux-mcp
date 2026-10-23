@@ -380,6 +380,14 @@ supports paragraph styles and alignment; Excel supports number formats, fill
 color, alignment and wrapping. Mixed formatting may return null or empty
 properties. Only explicitly supplied formatting properties change.
 
+Excel worksheet layout is not yet exposed: agents cannot read or change column
+widths, row heights, merged cells, borders, gridline visibility, zoom or print
+settings through the Office bridge. Matching another worksheet's fonts and
+colors therefore does not reproduce its complete layout. These capabilities
+still need to be added. Until then, complete layout changes in Excel itself or
+with a local Office tool after downloading the current cloud version; take
+care to preserve other editors' changes when uploading it again.
+
 Write tokens expire after two minutes and are consumed on attempted writes.
 Formatting edits require a formatting-inspection token; comment and revision
 edits require their own review tokens. Structural operations and revision
