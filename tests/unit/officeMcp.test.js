@@ -305,6 +305,30 @@ describe("Office MCP endpoint", { timeout: 10000 }, () => {
     assert.deepEqual(Buffer.concat(chunks), source);
   });
 
+  it("fails the fifth relay with a diagnostic and accepts another after a slot is freed", async (t) => {
+    const directory = await testDirectory(t);
+    const endpoint = await startLocalEndpoint({ directory, createServer: () => createOfficeMcpServer(new OfficeInspector(() => [])) });
+    const sockets = [];
+    t.after(async () => { for (const socket of sockets) socket.destroy(); await endpoint.close(); });
+    for (let index = 0; index < 4; index++) {
+      const socket = net.createConnection(endpoint.socketPath); sockets.push(socket);
+      await once(socket, "connect");
+      const client = rpcReader(socket, socket);
+      await initialize(client); client.close();
+    }
+    const child = spawn(process.execPath, [path.resolve(__dirname, "../../app/mcp/stdio.js"), endpoint.socketPath]);
+    t.after(() => child.kill());
+    const errors = []; child.stderr.on("data", (data) => errors.push(data.toString()));
+    assert.deepEqual(await once(child, "exit"), [1, null]);
+    assert.match(errors.join(""), /connection limit/);
+    sockets.pop().destroy();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const socket = net.createConnection(endpoint.socketPath); sockets.push(socket);
+    await once(socket, "connect");
+    const client = rpcReader(socket, socket); t.after(() => client.close());
+    await initialize(client);
+  });
+
   it("fails the stdio adapter clearly when Teams is not running", async (t) => {
     const directory = await testDirectory(t);
     const child = spawn(process.execPath, [path.resolve(__dirname, "../../app/mcp/stdio.js"), path.join(directory, "missing.sock")]);

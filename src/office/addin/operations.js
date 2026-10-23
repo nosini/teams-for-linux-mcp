@@ -94,8 +94,12 @@
     }
 
     remember(result) {
-      const saved = JSON.parse(JSON.stringify({ ...result, expires: this.now() + 120000 }));
-      while (this.snapshots.size >= 64) this.snapshots.delete(this.snapshots.keys().next().value);
+      const now = this.now();
+      const saved = JSON.parse(JSON.stringify({ ...result, expires: now + 120000 }));
+      for (const [token, snapshot] of this.snapshots) if (snapshot.expires <= now) this.snapshots.delete(token);
+      // A Word page can issue 50 tokens. Keep multiple pages available while
+      // retaining a hard per-document bound and the two-minute expiry.
+      while (this.snapshots.size >= 512) this.snapshots.delete(this.snapshots.keys().next().value);
       const readToken = this.randomUUID();
       this.snapshots.set(readToken, saved);
       return { ...result, readToken };

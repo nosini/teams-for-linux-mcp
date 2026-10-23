@@ -1,3 +1,4 @@
+const { officeUrl } = require("./urlPolicy");
 const { evaluateInFrame } = require("../mcp/evaluateInFrame");
 const { createBridgeSetupUiLoader } = require("./bridgeSetupUiLoader");
 const { nativeSetupInput } = require("./nativeSetupInput");
@@ -22,9 +23,8 @@ async function getRememberedDocumentAccount(contents, scope, accountHint) {
 
 function accountFrame(contents) {
   try {
-    const frame = contents.mainFrame, url = new URL(frame.url);
-    return !contents.isDestroyed() && url.protocol === "https:" && !url.username && !url.password && !url.port &&
-      ["login.microsoftonline.com", "login.microsoft.com", "login.live.com"].includes(url.hostname) ? frame : null;
+    const frame = contents.mainFrame;
+    return !contents.isDestroyed() && officeUrl(frame.url, "login") ? frame : null;
   } catch { return null; }
 }
 

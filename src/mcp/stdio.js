@@ -11,7 +11,13 @@ function run(socketPath) {
     return;
   }
   const socket = net.createConnection(socketPath);
+  let stopping = false, failed = false;
+  const unexpectedClose = () => {
+    console.error("Teams MCP connection closed unexpectedly. The connection limit may have been reached or the app stopped.");
+    process.exitCode = 1;
+  };
   const stop = () => {
+    stopping = true;
     process.stdin.unpipe(socket);
     process.stdin.pause();
     socket.destroy();
@@ -28,13 +34,18 @@ function run(socketPath) {
     if (process.stdin.readableEnded) socket.end();
   });
   socket.once("error", (error) => {
+    failed = true;
     const code = ["ENOENT", "ECONNREFUSED", "EACCES", "EPERM", "ETIMEDOUT"].includes(error.code) ? error.code : "CONNECTION_FAILED";
-    console.error(`Cannot connect to Teams MCP (${code}). Socket: ${JSON.stringify(socketPath)}`);
+    if (["ECONNRESET", "EPIPE"].includes(error.code)) unexpectedClose();
+    else console.error(`Cannot connect to Teams MCP (${code}). Socket: ${JSON.stringify(socketPath)}`);
     process.exitCode = 1;
     stop();
   });
   socket.once("close", () => {
     clearTimeout(timeout);
+    if (!stopping && !failed && !process.stdin.readableEnded) {
+      unexpectedClose();
+    }
     stop();
   });
   process.stdin.once("error", stop);

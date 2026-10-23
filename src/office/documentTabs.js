@@ -1,3 +1,4 @@
+const { officeUrl } = require("./urlPolicy");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { randomUUID } = require("node:crypto");
@@ -10,7 +11,7 @@ const LIMIT = 16;
 function documentUrl(value) {
   let url;
   try { url = new URL(value); } catch { throw new Error("Use a SharePoint Excel or Word document link."); }
-  if (url.protocol !== "https:" || url.username || url.password || url.port || value.length > 16384) throw new Error("Use a SharePoint Excel or Word document link.");
+  if (!officeUrl(value) || value.length > 16384) throw new Error("Use a SharePoint Excel or Word document link.");
   const sharepoint = url.hostname.endsWith(".sharepoint.com") &&
     (/\.(xlsx|xlsm|xlsb|xls|docx|docm|doc)$/i.test(url.pathname) ||
       /\/_layouts\/15\/(doc|wopiframe)\.aspx$/i.test(url.pathname) || /^\/:[xw]:\//i.test(url.pathname));
@@ -23,9 +24,8 @@ function documentUrl(value) {
 
 function allowedNavigation(value, initialOrigin) {
   try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password && !url.port &&
-      (url.origin === initialOrigin || ["login.microsoftonline.com", "login.microsoft.com", "login.live.com", "m365.cloud.microsoft", "excel.cloud.microsoft", "word.cloud.microsoft"].includes(url.hostname) || url.hostname.endsWith(".officeapps.live.com"));
+    const url = officeUrl(value);
+    return !!url && (url.origin === initialOrigin || !!officeUrl(value, "navigation"));
   } catch { return false; }
 }
 
@@ -40,8 +40,8 @@ function sourceDocumentUrl({ frame, metadata }) {
   for (let current = frame, depth = 0; current && depth < 24; current = current.parent, depth++) {
     try { return documentUrl(current.url); } catch { /* Look for the document's wrapper. */ }
     if (!office || current === frame) continue;
-    const url = new URL(current.url);
-    if (url.protocol !== "https:" || url.username || url.password || url.port) continue;
+    const url = officeUrl(current.url);
+    if (!url) continue;
     if (url.hostname.endsWith(".sharepoint.com") && (!container || new URL(container).hostname === "m365.cloud.microsoft")) container = url.href;
     else if (!container && url.hostname === "m365.cloud.microsoft") container = url.href;
   }
@@ -333,7 +333,12 @@ class DocumentTabs {
         const { getRememberedDocumentAccount } = require("./documentAccount");
         return getRememberedDocumentAccount(tab.view.webContents, new URL(tab.url).origin, accountHint);
       },
-      listDocuments: async () => { await this.list(); return { documents: this.#documents }; }, update,
+      listDocuments: async () => {
+        const id = tab.view.webContents.id;
+        const result = await this.#bridge.listDocuments({ webContentsId: id });
+        this.#documents = [...this.#documents.filter((document) => document.webContentsId !== id), ...result.documents];
+        return result;
+      }, update,
     })).then(update).catch(() => update({ status: "needs_attention", stage: "stopped", code: "SETUP_UI_UNAVAILABLE" })).finally(() => { tab.setupPromise = null; });
     this.#publish();
     return { tabId, bridgeSetup: { ...tab.bridgeSetup } };

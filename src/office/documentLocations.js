@@ -1,3 +1,4 @@
+const { officeUrl } = require("./urlPolicy");
 const { randomUUID } = require("node:crypto");
 const { evaluateInFrame } = require("../mcp/evaluateInFrame");
 const { filename } = require("../mcp/channelFileTypes");
@@ -27,8 +28,8 @@ function serverPath(value) {
 
 function sharepointPage(value) {
   try {
-    const url = new URL(value);
-    if (url.protocol !== "https:" || url.username || url.password || url.port || !url.hostname.endsWith(".sharepoint.com")) return null;
+    const url = officeUrl(value, "sharepoint");
+    if (!url) return null;
     const path = decodeURIComponent(url.pathname.replace(/^\/:[wx]:\/r(?=\/)/i, ""));
     const webPath = path.match(/^(?:\/(?:sites|teams|personal)\/[^/]+)/i)?.[0] || "";
     const layout = path.toLowerCase().indexOf("/_layouts/");
@@ -96,7 +97,7 @@ class DocumentLocations {
         if (response.status >= 300 && response.status < 400 || response.status === 401) throw new Error("SIGN_IN_REQUIRED");
         if (response.status === 403) throw new Error("SHAREPOINT_ACCESS_DENIED");
         if (response.status === 404) throw new Error("SHAREPOINT_NOT_FOUND");
-        if (response.status === 409) throw new Error("DOCUMENT_NAME_EXISTS. List the folder before choosing another name.");
+        if (response.status === 409 || response.status === 400 && response.errorCode === "document_name_exists") throw new Error("DOCUMENT_NAME_EXISTS. List the folder before choosing another name.");
         throw new Error(writing && response.status >= 500 ? "CREATION_OUTCOME_UNKNOWN" : "SHAREPOINT_REQUEST_FAILED");
       }
       let data;

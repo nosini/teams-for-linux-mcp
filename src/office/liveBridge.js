@@ -10,6 +10,8 @@ class LiveOfficeBridge {
   #probeTimeoutMs;
   #documents = new Map();
   #busy = new Set();
+  #listings = new Map();
+  #discovery = Promise.resolve();
 
   constructor(getWebContents, origin, { timeoutMs = 15000, probeTimeoutMs = 2000 } = {}) {
     this.#getWebContents = getWebContents;
@@ -36,13 +38,23 @@ class LiveOfficeBridge {
     return evaluateInFrame(frame, source, timeoutMs, messages.TIMEOUT);
   }
 
-  async listDocuments() {
+  listDocuments({ webContentsId } = {}) {
+    const key = webContentsId ?? "all";
+    if (this.#listings.has(key)) return this.#listings.get(key);
+    const listing = this.#discovery.then(() => this.#discover(webContentsId));
+    this.#discovery = listing.catch(() => {});
+    this.#listings.set(key, listing);
+    void listing.finally(() => this.#listings.delete(key)).catch(() => {});
+    return listing;
+  }
+
+  async #discover(webContentsId) {
     const candidates = [];
     for (const contents of this.#getWebContents()) {
       try {
-        if (contents.isDestroyed()) continue;
+        if (contents.isDestroyed() || webContentsId !== undefined && contents.id !== webContentsId) continue;
         for (const frame of contents.mainFrame.framesInSubtree) {
-          if (candidates.length < 64 && this.isAddin(frame)) candidates.push({ frame, contents });
+          if (candidates.length < 64 && this.isAddin(frame)) candidates.push({ frame, contents, frameUrl: frame.url });
         }
       } catch { /* Window closed during discovery. */ }
     }
@@ -51,21 +63,40 @@ class LiveOfficeBridge {
     const results = await Promise.allSettled(candidates.map(({ frame }) =>
       this.evaluate(frame, "globalThis.TeamsOfficeBridge?.describe()", this.#probeTimeoutMs)));
     const found = new Map();
-    for (let index = 0; index < results.length && found.size < 32; index++) {
-      const { frame, contents } = candidates[index], info = results[index].value;
+    // A failed describe() is not a disconnect. Keep that frame's known ID
+    // only while it is still present at the same local task-pane URL. A
+    // scoped listing keeps other windows' documents, but not closed ones, so
+    // they cannot fill the limit below.
+    for (const [id, entry] of this.#documents) {
+      if (webContentsId !== undefined && entry.webContentsId !== webContentsId) { if (this.#current(entry)) found.set(id, entry); continue; }
+      const index = candidates.findIndex(({ frame }) => frame === entry.frame);
       try {
-        if (info?.ready === true && ["excel", "word"].includes(info.application) && info.application === this.applicationOf(frame) && /^[a-f0-9-]{36}$/i.test(info.documentId)) {
-          found.set(info.documentId, { frame, id: info.documentId, name: typeof info.name === "string" ? info.name.slice(0, 256) : "Office document", application: info.application, webContentsId: contents.id });
+        if (index >= 0 && results[index].status === "rejected" && this.#current(entry)) found.set(id, entry);
+      } catch { /* Closed during discovery. */ }
+    }
+    for (let index = 0; index < results.length && found.size < 32; index++) {
+      const { frame, contents, frameUrl } = candidates[index], info = results[index].value;
+      try {
+        if (!contents.isDestroyed() && frame.url === frameUrl && contents.mainFrame.framesInSubtree.includes(frame) &&
+          info?.ready === true && ["excel", "word"].includes(info.application) && info.application === this.applicationOf(frame) && /^[a-f0-9-]{36}$/i.test(info.documentId)) {
+          found.set(info.documentId, { frame, frameUrl, contents, id: info.documentId, name: typeof info.name === "string" ? info.name.slice(0, 256) : "Office document", application: info.application, webContentsId: contents.id });
         }
       } catch { /* Window closed during discovery. */ }
     }
     this.#documents = found;
-    return { documents: [...found.values()].map(({ frame: _frame, ...metadata }) => metadata) };
+    return { documents: [...found.values()].filter((entry) => webContentsId === undefined || entry.webContentsId === webContentsId)
+      .map(({ frame: _frame, contents: _contents, frameUrl: _frameUrl, ...metadata }) => metadata) };
+  }
+
+  #current(entry) {
+    try { return !entry.contents.isDestroyed() && entry.frame.url === entry.frameUrl &&
+      entry.contents.mainFrame.framesInSubtree.includes(entry.frame) && this.applicationOf(entry.frame) === entry.application; }
+    catch { return false; }
   }
 
   async execute(documentId, operation, args) {
     const entry = this.#documents.get(documentId);
-    if (!entry || this.applicationOf(entry.frame) !== entry.application) throw new Error(messages.WRONG_DOCUMENT);
+    if (!entry || !this.#current(entry)) throw new Error(messages.WRONG_DOCUMENT);
     const operations = entry.application === "word" ? ["read_paragraphs", "read_paragraph", "replace_text", ...editing.wordOperations] :
       ["list_worksheets", "read_range", "write_range", "set_formulas", ...editing.excelOperations];
     if (!operations.includes(operation)) throw new Error(messages.WRONG_APPLICATION);

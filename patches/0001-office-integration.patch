@@ -81,10 +81,10 @@ index cbe7b2d4..921990be 100644
      try {
        dbusControlService?.stop();
      } catch (error) {
-@@ -799,6 +803,16 @@ async function handleAppReady() {
+@@ -812,6 +816,16 @@ async function handleAppReady() {
+     // silent and the user gets no completion feedback.
+     downloadManager.initialize(session.fromPartition(config.partition));
  
-     initializeGraphApiClient();
-     registerGraphApiHandlers(ipcMain, graphApiClient);
 +    if (OfficeMcp.isEnabled(config)) {
 +      officeMcp = new OfficeMcp({
 +        config,
@@ -95,9 +95,9 @@ index cbe7b2d4..921990be 100644
 +      });
 +      await officeMcp.start();
 +    }
-     if (teamsControlService && config.multiAccount?.enabled) {
-       profilesManager.on("switch", () => setImmediate(() => teamsControlService.refreshState()));
-     }
+     console.info('[IPC Security] Channel allowlisting enabled');
+     console.info(`[IPC Security] ${allowedChannels.size} channels allowlisted`);
+   } catch (error) {
 @@ -820,6 +834,13 @@ async function handleAppReady() {
  }
  

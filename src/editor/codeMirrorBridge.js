@@ -1,3 +1,4 @@
+const { officeUrl } = require("../office/urlPolicy");
 const { randomUUID } = require("node:crypto");
 const { codeMirrorCommand } = require("./codeMirrorCommand");
 const { evaluateInFrame } = require("../mcp/evaluateInFrame");
@@ -15,8 +16,7 @@ const messages = {
 };
 function allowedFrame(frame) {
   try {
-    const url = new URL(frame.url);
-    return !frame.detached && url.protocol === "https:" && !url.username && !url.password && !url.port && url.hostname.endsWith(".sharepoint.com");
+    return !frame.detached && !!officeUrl(frame.url, "sharepoint");
   } catch { return false; }
 }
 

@@ -1,3 +1,4 @@
+const { officeUrl } = require("./urlPolicy");
 const { classifyOfficeUrl } = require("./inspector");
 const { evaluateInFrame } = require("../mcp/evaluateInFrame");
 const { bridgeSetupUiScript } = require("./bridgeSetupUiLoader");
@@ -13,15 +14,23 @@ function activateSetupControl(contents, frame, command, raw, isCurrent, interact
 
 function setupFrame(frame, editor) {
   try {
-    const url = new URL(frame.url);
-    if (frame.detached || url.protocol !== "https:" || url.username || url.password || url.port ||
-      !(url.hostname.endsWith(".officeapps.live.com") || ["excel.cloud.microsoft", "word.cloud.microsoft", "store.office.com", "res.public.onecdn.static.microsoft"].includes(url.hostname))) return false;
+    if (frame.detached || !officeUrl(frame.url, "setup")) return false;
     for (let current = frame, depth = 0; current && depth < 24; current = current.parent, depth++) if (current === editor) return true;
   } catch { /* Detached frame. */ }
   return false;
 }
 
 const setupActions = ["home", "insert", "ribbonOverflow", "addins", "getAddins", "advanced", "moreSettings", "moreAddins", "manage", "myAddins", "uploadEntry", "bridge", "selectManifest", "submit", "trust"];
+
+// One frame that is loading, detaching or slow must not abort setup, but its
+// missing probe also means ambiguity and dialog state are unknown this round.
+async function probeSetupFrames(frames, evaluate) {
+  const results = await Promise.allSettled(frames.map(async (frame) => ({ frame, probe: await evaluate(frame, { type: "probe" }) })));
+  return {
+    complete: results.every((result) => result.status === "fulfilled"),
+    probes: results.filter((result) => result.status === "fulfilled" && result.value.probe).map((result) => result.value),
+  };
+}
 
 async function executeBridgeSetupStep(contents, manifests, action, interaction = "pointer") {
   if (!setupActions.includes(action) || !["click", "pointer", "native", "nativeMouse", "auto"].includes(interaction)) throw new Error("Choose a supported Bridge setup action and interaction.");
@@ -38,13 +47,17 @@ async function executeBridgeSetupStep(contents, manifests, action, interaction =
     }, interaction);
     return raw(command);
   };
+  let submitAttempted = false;
   try {
-    const probes = await Promise.all(all.filter((frame) => setupFrame(frame, editor)).slice(0, 16).map(async (frame) => ({ frame, probe: await evaluate(frame, { type: "probe" }) })));
+    const { probes, complete } = await probeSetupFrames(all.filter((frame) => setupFrame(frame, editor)).slice(0, 16), evaluate);
     const matches = probes.filter(({ probe }) => action === "selectManifest" ? probe.uploadInput : probe.actions?.includes(action));
-    if (matches.length !== 1) return { performed: false, code: matches.length ? "AMBIGUOUS_CONTROL" : "CONTROL_NOT_FOUND" };
+    if (matches.length > 1) return { performed: false, code: "AMBIGUOUS_CONTROL" };
+    if (!complete) return { performed: false, code: "SETUP_UI_UNAVAILABLE" };
+    if (!matches.length) return { performed: false, code: "CONTROL_NOT_FOUND" };
+    submitAttempted = action === "submit";
     const result = await evaluate(matches[0].frame, { type: action === "selectManifest" ? "fill" : "click", action, manifest: ["selectManifest", "submit"].includes(action) ? manifests[application] : undefined });
     return { performed: result?.performed === true, ...(result?.performed ? {} : { code: result?.code || "CONTROL_CHANGED" }) };
-  } catch { return { performed: false, code: action === "submit" ? "UPLOAD_OUTCOME_UNKNOWN" : "SETUP_UI_UNAVAILABLE" }; }
+  } catch { return { performed: false, code: submitAttempted ? "UPLOAD_OUTCOME_UNKNOWN" : "SETUP_UI_UNAVAILABLE" }; }
 }
 
 async function inspectBridgeSetup(contents) {
@@ -110,7 +123,12 @@ async function runBridgeSetup({ contents, manifests, listDocuments, update, sign
   let accountSelection;
   const clicked = new Set();
   const result = (status, code) => ({ status, stage, submitted, elapsedMs: Math.round(performance.now() - started), ...(accountSelection ? { accountSelection } : {}), ...(code ? { code } : {}) });
-  const report = () => update(result("running"));
+  let lastReport;
+  // Publish on state changes and about once a second, not on every poll.
+  const report = () => {
+    const key = JSON.stringify([stage, submitted, accountSelection, Math.floor((performance.now() - started) / 1000)]);
+    if (key !== lastReport) { lastReport = key; update(result("running")); }
+  };
   const wait = (ms) => new Promise((resolve) => {
     const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
     const timer = setTimeout(done, ms);
@@ -131,11 +149,10 @@ async function runBridgeSetup({ contents, manifests, listDocuments, update, sign
       const documents = (await listDocuments()).documents.filter((document) => document.webContentsId === contents.id);
       if (signal.aborted || contents.isDestroyed()) return result("needs_attention", "CANCELLED");
       if (documents.length) { stage = submitted ? "connected_after_upload" : "connected"; return result("connected"); }
+      report();
       const all = contents.mainFrame.framesInSubtree;
       signInPending = all.some((frame) => { try {
-        const url = new URL(frame.url);
-        return url.protocol === "https:" && !url.username && !url.password && !url.port &&
-          ["login.microsoftonline.com", "login.microsoft.com", "login.live.com"].includes(url.hostname);
+        return !!officeUrl(frame.url, "login");
       } catch { return false; } }) && !all.some((frame) => ["excel", "word"].includes(classifyOfficeUrl(frame.url)?.application));
       if (signInPending) {
         // A normal SSO redirect visits the login host too. Let Microsoft use
@@ -168,9 +185,12 @@ async function runBridgeSetup({ contents, manifests, listDocuments, update, sign
       }
       if (editor.detached || editor.url !== editorUrl || !all.includes(editor)) return result("needs_attention", "DOCUMENT_CHANGED");
       const frames = all.filter((frame) => setupFrame(frame, editor)).slice(0, 16);
-      const probes = await Promise.all(frames.map(async (frame) => ({ frame, probe: await evaluate(frame, { type: "probe" }) })));
+      const { probes, complete } = await probeSetupFrames(frames, evaluate);
       const file = probes.filter(({ probe }) => probe.uploadInput);
       if (file.length > 1) return result("needs_attention", "AMBIGUOUS_UPLOAD");
+      // A missed probe may be the upload dialog or a second matching control.
+      // Do not fill, submit or click anything until every frame answers.
+      if (!complete) { await wait(pollMs); continue; }
       if (file.length && !submitted) {
         const { frame, probe } = file[0];
         if (!selectedFrame) {

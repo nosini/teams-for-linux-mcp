@@ -42,6 +42,58 @@ function fixture(application = "excel") {
 }
 
 describe("Live Office bridge", () => {
+  it("retains a discovered document through one failed probe but retires it on disconnect or a new session", async () => {
+    const { bridge, frame, id, scope } = fixture("word");
+    await bridge.listDocuments();
+    const execute = frame.executeJavaScript;
+    frame.executeJavaScript = (source, gesture) => source.includes("describe()") ? Promise.reject(new Error("temporary")) : execute(source, gesture);
+    assert.equal((await bridge.listDocuments()).documents[0].id, id);
+    assert.equal((await bridge.execute(id, "read_paragraphs", {})).paragraphs[0].text, "Hello from Word.");
+    frame.executeJavaScript = execute;
+    scope.TeamsOfficeBridge.describe = () => ({ ready: false });
+    assert.equal((await bridge.listDocuments()).documents.length, 0);
+    await assert.rejects(bridge.execute(id, "read_paragraphs", {}), /document changed/);
+    const nextId = randomUUID();
+    scope.TeamsOfficeBridge.describe = () => ({ documentId: nextId, application: "word", ready: true });
+    assert.equal((await bridge.listDocuments()).documents[0].id, nextId);
+    frame.detached = true;
+    assert.equal((await bridge.listDocuments()).documents.length, 0);
+  });
+
+  it("scopes setup discovery to one webContents and preserves other documents for execution", async () => {
+    const first = fixture(), second = fixture();
+    let firstProbes = 0, secondProbes = 0;
+    const wrap = (frame, count) => {
+      const execute = frame.executeJavaScript;
+      frame.executeJavaScript = (source, gesture) => { if (source.includes("describe()")) count(); return execute(source, gesture); };
+    };
+    wrap(first.frame, () => firstProbes++); wrap(second.frame, () => secondProbes++);
+    const contents = [first, second].map(({ frame }, i) => ({ id: i + 1, isDestroyed: () => false, mainFrame: { framesInSubtree: [frame] } }));
+    const bridge = new LiveOfficeBridge(() => contents, "https://127.0.0.1:39847");
+    assert.equal((await bridge.listDocuments()).documents.length, 2);
+    const scoped = await bridge.listDocuments({ webContentsId: 1 });
+    assert.deepEqual(scoped.documents.map((doc) => doc.id), [first.id]);
+    assert.equal(firstProbes, 2); assert.equal(secondProbes, 1);
+    assert.equal((await bridge.execute(second.id, "list_worksheets", {})).worksheets[0].id, "sheet-id");
+    contents[0].mainFrame.framesInSubtree = [];
+    await assert.rejects(bridge.execute(first.id, "list_worksheets", {}), /document changed/);
+  });
+
+  it("does not let closed documents from other windows fill a scoped listing", async () => {
+    const origin = "https://127.0.0.1:39847";
+    const pane = () => {
+      const documentId = randomUUID();
+      return { url: `${origin}/taskpane.html`, parent: { url: "https://euc-excel.officeapps.live.com/x/edit" },
+        executeJavaScript: async () => ({ documentId, application: "excel", ready: true }) };
+    };
+    const contents = Array.from({ length: 33 }, (_, i) => ({ id: i + 1, isDestroyed: () => false, mainFrame: { framesInSubtree: i ? [pane()] : [] } }));
+    const bridge = new LiveOfficeBridge(() => contents, origin);
+    assert.equal((await bridge.listDocuments()).documents.length, 32);
+    for (const item of contents.slice(1)) item.mainFrame.framesInSubtree = [];
+    contents[0].mainFrame.framesInSubtree = [pane()];
+    assert.equal((await bridge.listDocuments({ webContentsId: 1 })).documents.length, 1);
+  });
+
   it("discovers Word task panes, binds their application, and rejects tools for the wrong host", async () => {
     const { bridge, frame, id } = fixture("word");
     assert.equal((await bridge.listDocuments()).documents[0].application, "word");
@@ -165,6 +217,11 @@ describe("Live Office bridge", () => {
       assert.equal(tools.find((tool) => tool.name === "word_resolve_tracked_change").annotations.destructiveHint, true);
       if (application === "excel") {
         const target = { worksheetId: "sheet-id", address: "A1" };
+        for (const tool of ["excel_read_range", "excel_read_range_format"]) {
+          const invalid = await call(tool, { ...target, address: "A0" });
+          assert.equal(invalid.isError, true);
+          assert.match(invalid.content[0].text, /Use an A1 rectangle of at most 1,000 cells/);
+        }
         assert.equal((await call("excel_inspect_worksheet", { worksheetId: "sheet-id" })).structuredContent.usedRange.rowCount, 1);
         assert.equal((await call("excel_search_range", { ...target, query: "1" })).structuredContent.matches[0].address, "A1");
         const read = (await call("excel_read_range_format", target)).structuredContent;

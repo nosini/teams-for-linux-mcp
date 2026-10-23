@@ -1,7 +1,8 @@
 const { McpServer } = require("@modelcontextprotocol/server");
 const { z } = require("zod");
-const { rangeShape, validateData } = require("../office/addin/operations");
-const { validateText, paragraphIdPattern } = require("../office/addin/wordOperations");
+const { validateData } = require("../office/addin/operations");
+const { validateText } = require("../office/addin/wordOperations");
+const { documentId, worksheetId, paragraphId, address } = require("./officeSchemas");
 const { registerJsonTool } = require("./tools");
 
 function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null, surfaceInspector = null, codeMirrorBridge = null, documentTabs = null) {
@@ -22,16 +23,10 @@ function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null
     errorMessage: () => "Editor is no longer available. Call office_list_editors again.",
   }, ({ editorId }) => inspector.inspectEditor(editorId));
   if (liveBridge) {
-    const documentId = z.string().uuid();
-    const worksheetId = z.string().min(1).max(256);
-    const address = z.string().max(24).refine((value) => {
-      try { rangeShape(value); return true; } catch { return false; }
-    }, "Use an A1 rectangle of at most 1,000 cells.");
     tool("office_list_documents", {
       description: "List Excel and Word documents connected through the installed Teams Office Bridge task pane. Open the corresponding add-in in each document to connect it. Returns temporary document IDs and application names; call this before document operations.",
       inputSchema: z.object({}).strict(),
     }, () => liveBridge.listDocuments());
-    const paragraphId = z.string().regex(paragraphIdPattern);
     tool("word_read_paragraphs", {
       description: "Read a page of main-body Word paragraphs with session-local paragraph IDs, text and single-use two-minute read tokens. start is a zero-based discovery offset; use paragraph IDs for edits. Pages can shift during coauthoring. Returns nextStart, or null at the end. Headers, footers and text boxes are outside this scope. Requires WordApi 1.6.",
       inputSchema: z.object({ documentId, start: z.number().int().min(0).max(100000).default(0), count: z.number().int().min(1).max(50).default(20) }).strict(),

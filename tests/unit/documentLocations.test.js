@@ -38,6 +38,27 @@ function fixture(urls = [folderUrl]) {
 }
 
 describe("document folder discovery and creation", () => {
+  it("recognizes SharePoint's duplicate-name SPException without classifying other HTTP 400 errors as conflicts", async (t) => {
+    const f = fixture(); t.after(() => f.locations.close());
+    const id = (await f.locations.list()).locations[0].locationId;
+    for (const key of ["error", "odata.error"]) {
+      for (const code of ["-2130575257, Microsoft.SharePoint.SPException", "-1, Microsoft.SharePoint.SPException"]) {
+        let uploads = 0;
+        f.state.onRequest = async (url) => {
+          if (!url.includes("AddUsingPath")) return;
+          uploads++;
+          return Response.json({ [key]: { code, message: "private filename and credentials" } }, { status: 400 });
+        };
+        await assert.rejects(f.locations.create(id, "Taken"), (error) => {
+          assert.match(error.message, code.startsWith("-2130575257") ? /DOCUMENT_NAME_EXISTS/ : /SHAREPOINT_REQUEST_FAILED/);
+          assert.doesNotMatch(error.message, /private filename|credentials/);
+          return true;
+        });
+        assert.equal(uploads, 1);
+      }
+    }
+  });
+
   it("recognizes folder URLs, document IDs and direct document parents without accepting arbitrary sites", () => {
     assert.equal(locationSource(folderUrl).folderPath, folder);
     assert.equal(locationSource(documentUrl).fileId, fileId);

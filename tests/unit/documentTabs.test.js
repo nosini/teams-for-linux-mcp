@@ -48,13 +48,50 @@ function fixture(t, documentSession = null) {
   const frame = { url: "https://tenant.sharepoint.com/_layouts/15/Doc.aspx?sourcedoc=private" };
   const inspector = { collect: () => ({ entries: [{ frame, metadata: { id: "7:8:9", webContentsId: otherAccount.id, surface: "document-wrapper" } }] }) };
   let documents = [];
-  const bridge = { listDocuments: async () => ({ documents }) };
+  const discovery = [];
+  const bridge = { listDocuments: async (options) => { discovery.push(options); return { documents: documents.filter((doc) => !options || doc.webContentsId === options.webContentsId) }; } };
   const tabs = new DocumentTabs({ getMainWindow: () => main, inspector, liveBridge: bridge, manifests: { excel: "excel manifest", word: "word manifest" }, documentSession, electron });
   t.after(() => tabs.close());
-  return { tabs, windows, views, main, otherAccount, app, handlers, frame, inspector, setDocuments: (value) => { documents = value; } };
+  return { tabs, windows, views, discovery, main, otherAccount, app, handlers, frame, inspector, setDocuments: (value) => { documents = value; } };
 }
 
 describe("persistent document tabs", () => {
+  it("hides the Documents window on close but lets app quit destroy it", (t) => {
+    const { tabs, app, views, windows, handlers } = fixture(t);
+    tabs.open({ url: "https://tenant.sharepoint.com/file.docx" });
+    let prevented = false;
+    windows[0].emit("close", { preventDefault: () => { prevented = true; } });
+    assert.equal(prevented, true);
+    assert.equal(views[0].webContents.isDestroyed(), false);
+    // Upstream quits when the main window closes; quitting must not be
+    // blocked by the hidden workspace.
+    app.emit("before-quit");
+    prevented = false;
+    windows[0].emit("close", { preventDefault: () => { prevented = true; } });
+    assert.equal(prevented, false);
+    assert.equal(windows[0].isDestroyed(), true);
+    assert.equal(views[0].webContents.isDestroyed(), true);
+    assert.equal(handlers.has("office-tabs"), false);
+  });
+
+  it("limits setup discovery to its own tab without repeated source scans or IPC updates", async (t) => {
+    const { tabs, views, windows, discovery, inspector, setDocuments } = fixture(t);
+    const first = tabs.open({ url: "https://tenant.sharepoint.com/file.docx" });
+    tabs.open({ url: "https://tenant.sharepoint.com/other.docx" });
+    let scans = 0, publishes = 0;
+    inspector.collect = () => { scans++; return { entries: [] }; };
+    windows[0].webContents.send = () => { publishes++; };
+    await tabs.setupBridge(first.tabId);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert.ok(discovery.length >= 2);
+    assert.ok(discovery.every((options) => options?.webContentsId === views[0].webContents.id));
+    assert.equal(scans, 2, "Only the initial state and stage transition scan sources");
+    assert.equal(publishes, 2);
+    setDocuments([{ id: "ready", application: "word", webContentsId: views[0].webContents.id }]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal((await tabs.list()).tabs[0].bridgeSetup.status, "connected");
+  });
+
   it("creates in the discovered account, opens hidden and starts Bridge setup without a pasted URL", async (t) => {
     const { tabs, windows, views, main, otherAccount, setDocuments } = fixture(t);
     const folder = "/sites/team/Shared Documents";

@@ -13,6 +13,73 @@ function fixture() {
 const timing = { timeoutMs: 100, pollMs: 1, interaction: "pointer" };
 
 describe("Office Bridge import job", () => {
+  it("does not act on a setup round while an eligible frame's probe fails", async () => {
+    const { editor, contents, options } = fixture();
+    let failures = 3;
+    contents.mainFrame.framesInSubtree.push({ url: "https://store.office.com/loading", parent: editor,
+      executeJavaScript: async () => { if (failures > 0) { failures--; throw new Error("still loading"); } return { actions: [] }; } });
+    let actions = 0;
+    editor.executeJavaScript = async (source) => {
+      if (source.includes('"type":"probe"')) return { actions: ["addins"] };
+      assert.equal(failures, 0, "The unknown frame might hold a second Add-ins control");
+      actions++; return { performed: true };
+    };
+    assert.deepEqual(await executeBridgeSetupStep(contents, options.manifests, "addins"), { performed: false, code: "SETUP_UI_UNAVAILABLE" });
+    options.listDocuments = async () => ({ documents: actions ? [{ webContentsId: 9 }] : [] });
+    assert.equal((await runBridgeSetup(options, timing)).status, "connected");
+    assert.equal(actions, 1);
+  });
+
+  it("keeps waiting on a filled upload dialog whose probe misses a round", async () => {
+    const { editor, contents, options } = fixture();
+    let filled = false, missed = false, uploads = 0;
+    const clicks = [];
+    const record = (source) => { clicks.push(source.match(/"action":"(\w+)"/)?.[1]); return { performed: true }; };
+    options.listDocuments = async () => ({ documents: uploads ? [{ webContentsId: 9 }] : [] });
+    // The ribbon still offers an unclicked control while the dialog is open.
+    editor.executeJavaScript = async (source) => source.includes('"type":"probe"') ? { actions: ["getAddins"] } : record(source);
+    contents.mainFrame.framesInSubtree.push({ url: "https://store.office.com/upload", parent: editor, executeJavaScript: async (source) => {
+      if (source.includes('"type":"probe"')) {
+        if (filled && !missed) { missed = true; throw new Error("temporary probe failure"); }
+        return { actions: ["submit"], uploadInput: true, expectedFile: filled };
+      }
+      if (source.includes('"type":"fill"')) { filled = true; return { performed: true }; }
+      uploads++; return record(source);
+    } });
+    const result = await runBridgeSetup(options, timing);
+    assert.equal(result.status, "connected");
+    assert.equal(missed, true);
+    assert.deepEqual(clicks, ["submit"]);
+  });
+
+  it("refreshes elapsedMs while a stage lasts longer than a second", async () => {
+    const { options, updates } = fixture();
+    await runBridgeSetup(options, { ...timing, timeoutMs: 1300, pollMs: 20 });
+    const waiting = updates.filter((state) => state.status === "running" && state.stage === "waiting_for_editor");
+    assert.ok(waiting.length >= 2 && waiting.length <= 3);
+    assert.ok(waiting.at(-1).elapsedMs >= 1000);
+  });
+
+  it("retries passive probes after submission without dispatching Upload twice", async () => {
+    const { editor, options } = fixture();
+    let filled = false, submitted = false, missed = false, recovered = false, uploads = 0;
+    options.listDocuments = async () => ({ documents: recovered ? [{ webContentsId: 9 }] : [] });
+    editor.executeJavaScript = async (source) => {
+      if (source.includes('"type":"probe"')) {
+        if (submitted && !missed) { missed = true; throw new Error("temporary probe failure"); }
+        if (submitted) recovered = true;
+        return { actions: ["submit"], uploadInput: true, expectedFile: filled };
+      }
+      if (source.includes('"type":"fill"')) filled = true;
+      else { submitted = true; uploads++; }
+      return { performed: true };
+    };
+    const result = await runBridgeSetup(options, timing);
+    assert.equal(result.status, "connected");
+    assert.equal(missed, true);
+    assert.equal(uploads, 1);
+  });
+
   it("follows Add-ins, Advanced, Upload My Add-in, manifest selection and Upload in order", async () => {
     const { editor, options } = fixture();
     const actions = ["addins", "advanced", "uploadEntry", "selectManifest", "submit"];

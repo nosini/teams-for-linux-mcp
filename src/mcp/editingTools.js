@@ -1,13 +1,10 @@
 const { z } = require("zod");
 const { registerJsonTool } = require("./tools");
-const { rangeShape, editing } = require("../office/addin/operations");
-const { paragraphIdPattern } = require("../office/addin/wordOperations");
+const { editing } = require("../office/addin/operations");
+const { documentId, worksheetId, paragraphId, address } = require("./officeSchemas");
 
 function registerEditingTools(server, bridge) {
-  const documentId = z.string().uuid(), readToken = z.string().uuid();
-  const worksheetId = z.string().min(1).max(256);
-  const paragraphId = z.string().regex(paragraphIdPattern);
-  const address = z.string().max(24).refine((value) => { try { rangeShape(value); return true; } catch { return false; } });
+  const readToken = z.string().uuid();
   const paragraph = { documentId, paragraphId }, range = { documentId, worksheetId, address };
   const page = { start: z.number().int().min(0).max(100000).default(0), count: z.number().int().min(1).max(50).default(20) };
   const font = z.object({ bold: z.boolean().optional(), italic: z.boolean().optional(), name: z.string().min(1).max(100).optional(), size: z.number().min(1).max(200).optional(), color: z.string().regex(/^#[\da-f]{6}$/i).optional() }).strict();

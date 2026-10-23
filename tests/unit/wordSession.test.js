@@ -15,6 +15,21 @@ function fixture(texts) {
 }
 
 describe("Word live session", () => {
+  it("keeps tokens from earlier paragraph and structure pages until used or expired", async () => {
+    for (const operation of ["read_paragraphs", "read_structure"]) {
+      const { call, session, state } = fixture(Array.from({ length: 100 }, (_, i) => "Paragraph " + i));
+      const first = (await call(operation, { count: 50 })).data.paragraphs;
+      await call(operation, { start: 50, count: 50 });
+      const result = await call("replace_text", { ...first[10], findText: "Paragraph", replacementText: "Updated" });
+      assert.equal(result.ok, true);
+      assert.equal(result.data.text, "Updated 10");
+      assert.equal((await call("replace_text", { ...first[10], findText: "Updated", replacementText: "Again" })).code, "STALE_PARAGRAPH");
+      state.now += 120000;
+      await call("read_paragraphs", { count: 1 });
+      assert.equal(session.snapshots.size, 1, "Expired snapshots are pruned before issuing new tokens");
+    }
+  });
+
   it("pages main-body paragraphs and returns scoped snapshots without loading the whole document", async () => {
     const { call, model, session } = fixture(["One", "Two", "Three"]);
     const first = await call("read_paragraphs", { count: 2 });

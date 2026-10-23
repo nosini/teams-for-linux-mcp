@@ -1,8 +1,11 @@
 // Fixed Microsoft account-picker command. The chosen username stays private
 // to this login page and the local app; no caller-provided selectors or code.
+// Older running loaders hot-reload this file and pass only the request, so it
+// keeps its own copy of urlPolicy's login and SharePoint checks.
 function documentAccountUi(request) {
+  const plainHttps = (url) => url.protocol === "https:" && !url.username && !url.password && !url.port;
   if (location.href !== request.url || Date.now() >= request.deadline ||
-    location.protocol !== "https:" || !["login.microsoftonline.com", "login.microsoft.com", "login.live.com"].includes(location.hostname)) return { performed: false, code: "ACCOUNT_PAGE_CHANGED" };
+    !plainHttps(new URL(location.href)) || !["login.microsoftonline.com", "login.microsoft.com", "login.live.com"].includes(location.hostname)) return { performed: false, code: "ACCOUNT_PAGE_CHANGED" };
   const visible = (element) => {
     if (!element || getComputedStyle(element).visibility !== "visible") return false;
     for (let node = element; node; node = node.parentElement) {
@@ -24,8 +27,7 @@ function documentAccountUi(request) {
     // Older running builds can install the passive recorder through their
     // hot-reloaded probe before restarting, using Microsoft's redirect target.
     const target = new URL(request.scope || new URL(location.href).searchParams.get("redirect_uri"));
-    if (target.protocol === "https:" && !target.username && !target.password && !target.port &&
-      (target.hostname.endsWith(".sharepoint.com") || ["word.cloud.microsoft", "excel.cloud.microsoft", "m365.cloud.microsoft"].includes(target.hostname))) scope = target.origin;
+    if (plainHttps(target) && (target.hostname.endsWith(".sharepoint.com") || ["word.cloud.microsoft", "excel.cloud.microsoft", "m365.cloud.microsoft"].includes(target.hostname))) scope = target.origin;
   } catch { /* No recognized document site: do not guess a storage scope. */ }
   const key = scope ? `teams-office.document-account.v1:${scope}` : null;
   if (request.type === "remembered") {

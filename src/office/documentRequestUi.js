@@ -36,7 +36,8 @@ async function documentRequestUi(request) {
       try {
         const data = JSON.parse(text), code = data.error?.code || data["odata.error"]?.code;
         if (typeof code === "string") {
-          if (code.endsWith("System.UnauthorizedAccessException")) errorCode = "access_denied";
+          if (code === "-2130575257, Microsoft.SharePoint.SPException") errorCode = "document_name_exists";
+          else if (code.endsWith("System.UnauthorizedAccessException")) errorCode = "access_denied";
           else if (code.endsWith("Microsoft.SharePoint.SPException")) errorCode = "sharepoint_error";
         }
       } catch { /* Non-JSON failures carry only the HTTP status. */ }

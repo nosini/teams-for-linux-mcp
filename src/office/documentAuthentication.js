@@ -1,3 +1,4 @@
+const { officeUrl } = require("./urlPolicy");
 // Read-only diagnostics for the selected document's session. Never return
 // cookie values, account identifiers, document URLs or profile paths.
 function cookieAttributes(cookie, origin) {
@@ -19,8 +20,7 @@ async function inspectDocumentAuthentication(session, documentUrl) {
   try { persistentSession = session.isPersistent(); } catch { /* Test doubles or unavailable session. */ }
   let sharepointOrigin;
   try {
-    const url = new URL(documentUrl);
-    if (url.protocol === "https:" && !url.username && !url.password && !url.port && url.hostname.endsWith(".sharepoint.com")) sharepointOrigin = url.origin;
+    sharepointOrigin = officeUrl(documentUrl, "sharepoint")?.origin;
   } catch { /* Cloud document links do not identify a SharePoint tenant. */ }
   const status = async (url, name, attributes = false) => {
     if (!url) return { state: "unavailable", attributes: null };

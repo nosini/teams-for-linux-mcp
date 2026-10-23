@@ -22,6 +22,31 @@ function create(userDataPath, mcp, graphApiClient = null) {
 const authority = "net::ERR_CERT_AUTHORITY_INVALID";
 
 describe("Office MCP startup", () => {
+
+  it("slow Office MCP startup leaves shortcuts, updater and download handling initialized", async () => {
+    const vm = require("node:vm");
+    const source = await fs.readFile(path.resolve(__dirname, "../../app/index.js"), "utf8");
+    const start = source.indexOf("    initializeGraphApiClient();", source.indexOf("async function handleAppReady()"));
+    const end = source.indexOf("    console.info('[IPC Security]", start);
+    assert.ok(start >= 0 && end > start);
+    let complete;
+    const pending = new Promise((resolve) => { complete = resolve; });
+    const calls = [];
+    class OfficeMcp {
+      static isEnabled() { return true; }
+      start() { calls.push("mcp"); return pending; }
+    }
+    const startup = vm.runInNewContext(`(async () => { let officeMcp; ${source.slice(start, end)} })()`, {
+      OfficeMcp, config: {}, app: { getPath: () => "fixture" }, mainAppWindow: {}, webContents: {}, graphApiClient: {}, ipcMain: {}, teamsControlService: null,
+      initializeGraphApiClient() {}, registerGraphApiHandlers() {},
+      initializeQuickChat: () => calls.push("chat"), registerGlobalShortcuts: () => calls.push("shortcuts"),
+      initializeAutoUpdater: () => calls.push("updater"), session: { fromPartition() {} },
+      downloadManager: { initialize: () => calls.push("downloads") },
+    });
+    try { assert.deepEqual(calls, ["chat", "shortcuts", "updater", "downloads", "mcp"]); }
+    finally { complete(); await startup; }
+  });
+
   it("serves tools with the app's Graph client and keeps the endpoint when the add-in host fails", async (t) => {
     const directory = await userData(t);
     let tokenRequests = 0;

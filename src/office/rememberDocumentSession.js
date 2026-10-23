@@ -1,3 +1,4 @@
+const { officeUrl } = require("./urlPolicy");
 const DAY = 24 * 60 * 60;
 
 // Opt-in browser persistence for opened SharePoint document sites and their
@@ -29,8 +30,8 @@ class RememberDocumentSession {
     if (this.#closed || !session.isPersistent()) return;
     let host;
     try {
-      const url = new URL(documentUrl);
-      if (url.protocol !== "https:" || url.username || url.password || url.port || !url.hostname.endsWith(".sharepoint.com")) return;
+      const url = officeUrl(documentUrl, "sharepoint");
+      if (!url) return;
       host = url.hostname;
     } catch { return; }
     let state = this.#sessions.get(session);
