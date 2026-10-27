@@ -516,7 +516,7 @@ table row can exceed this limit.
 | --- | --- | --- |
 | `excel_inspect_worksheet` | `worksheetId`, optional page | Used bounds, paged structured tables and layout token |
 | `excel_search_range` | `worksheetId`, `address`, `query`, optional `searchIn` (`text`/`formulas`), `matchCase`, `offset` | Up to 50 literal matches; continue with `nextOffset` in the same window |
-| `excel_read_range_format` | `worksheetId`, `address` | Values, formulas, text, number formats, basic formatting and format token |
+| `excel_read_range_format` | `worksheetId`, `address` | Values, formulas, text, number formats, basic formatting, individual column widths/row heights and format token |
 | `excel_format_range` | Same range, `readToken`, `format` | Uniform formatting; checks content and inspected formatting |
 | `excel_create_worksheet` | `name`, `readToken` from `excel_list_worksheets` | New worksheet ID/name/position; checks the sheet list |
 | `excel_insert_rows_columns` | `worksheetId`, `axis` (`rows`/`columns`), `index`, `count`, layout `readToken` | Insert whole rows/columns before a zero-based index |
@@ -527,7 +527,24 @@ to plan windows across large sheets. Search results are not write tokens.
 
 Excel `format` accepts `numberFormat` (one invariant format string applied to all
 cells), `font`, `fillColor`, `horizontalAlignment`, `verticalAlignment` and
-`wrapText`. Font accepts `bold`, `italic`, `name`, `size` (1–200 points) and
+`wrapText`. Sizing accepts `columnWidth` (nonnegative points), `rowHeight`
+(0–409 points), `autoFitColumns: true` and `autoFitRows: true`. Zero size hides
+the intersecting columns/rows. An explicit size and AutoFit cannot be combined
+for the same axis. Width and height changes affect whole columns/rows, even
+when the inspected rectangle covers only part of them. AutoFit uses the cells
+in that rectangle, after applying any other supplied formatting.
+
+On ExcelApi 1.2 hosts, formatting reads return `format.columnWidths` and
+`format.rowHeights` arrays in points, ordered left-to-right and top-to-bottom.
+Tokens compare each individual dimension to detect coauthor resizing even
+when the range has mixed sizes. Both arrays are omitted on 1.1 hosts, which
+continue to support basic formatting but reject sizing requests.
+
+For example, read the format of `B1:B20`, then pass its token with
+`format: { "columnWidth": 150 }` to widen column B, or with
+`format: { "autoFitColumns": true }` to fit it to those twenty cells.
+
+Font accepts `bold`, `italic`, `name`, `size` (1–200 points) and
 `color`; colors use `#RRGGBB`. Unspecified properties remain unchanged. Mixed
 properties may return null/empty values. Number formats are a per-cell matrix.
 
@@ -537,7 +554,9 @@ up to 100 rows or 20 columns per call. Layout tokens compare worksheet ID and
 used-range bounds, not all cell content or table structure. Excel shifts data
 and references. Coordinate structural edits with coauthors. These operations
 invalidate all earlier pane tokens. Used-range inspection/insertion require
-ExcelApi 1.4; other new Excel tools require ExcelApi 1.1.
+ExcelApi 1.4; sizing requires ExcelApi 1.2, and other new Excel tools require
+ExcelApi 1.1. See Microsoft’s [RangeFormat reference](https://learn.microsoft.com/en-us/javascript/api/excel/excel.rangeformat?view=office-js)
+for the sizing APIs.
 
 ### Word
 

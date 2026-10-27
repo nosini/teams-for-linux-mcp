@@ -77,6 +77,67 @@ describe("Extended Excel live editing", () => {
     }
   });
 
+  it("reads mixed dimensions and sizes only the intersecting columns and rows", async () => {
+    const { call, model } = fixture("excel", [[1, 2], [3, 4]]);
+    const area = { worksheetId: "sheet-id", address: "B2:C3" };
+    model.columnWidths = { 0: 50, 1: 60, 2: 90, 3: 100 };
+    model.rowHeights = { 0: 10, 1: 15, 2: 20, 3: 25 };
+    const before = (await call("read_range_format", area)).data;
+    assert.deepEqual(before.format.columnWidths, [60, 90]);
+    assert.deepEqual(before.format.rowHeights, [15, 20]);
+    const result = await call("format_range", { ...area, readToken: before.readToken, format: { columnWidth: 120, rowHeight: 30 } });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.data.format.columnWidths, [120, 120]);
+    assert.deepEqual(result.data.format.rowHeights, [30, 30]);
+    assert.deepEqual(model.columnWidths, { 0: 50, 1: 120, 2: 120, 3: 100 });
+    assert.deepEqual(model.rowHeights, { 0: 10, 1: 30, 2: 30, 3: 25 });
+    assert.deepEqual(model.values, [[1, 2], [3, 4]]);
+    assert.equal(model.font.bold, false);
+    assert.equal((await call("format_range", { ...area, readToken: result.data.readToken, format: { columnWidth: 0, rowHeight: 0 } })).ok, true);
+    assert.equal(model.columnWidths[1], 0);
+    assert.equal(model.rowHeights[1], 0);
+  });
+
+  it("rejects dimension changes even when both old and new aggregate sizes are mixed", async () => {
+    for (const key of ["columnWidths", "rowHeights"]) {
+      const { call, model } = fixture("excel", [[1, 2], [3, 4]]);
+      model[key] = { 0: 30, 1: 60 };
+      const area = { worksheetId: "sheet-id", address: "A1:B2" };
+      const before = (await call("read_range_format", area)).data;
+      model[key][1] = 70;
+      const result = await call("format_range", { ...area, readToken: before.readToken, format: { columnWidth: 100 } });
+      assert.equal(result.code, "STALE_READ", key);
+      assert.equal(model.writes, 0, key);
+    }
+  });
+
+  it("autofits selected cells and returns fresh dimensions and a usable token", async () => {
+    const { call, model } = fixture("excel", [["Long label", "Short"], ["Outside the selected row", "x"]]);
+    const area = { worksheetId: "sheet-id", address: "A1:B1" };
+    const before = (await call("read_range_format", area)).data;
+    const result = await call("format_range", { ...area, readToken: before.readToken, format: { autoFitColumns: true, autoFitRows: true } });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.data.format.columnWidths, [70, 35]);
+    assert.deepEqual(result.data.format.rowHeights, [15]);
+    assert.deepEqual(model.autoFits, [{ axis: "Columns", address: area.address }, { axis: "Rows", address: area.address }]);
+    assert.equal((await call("format_range", { ...area, readToken: result.data.readToken, format: { columnWidth: 90 } })).ok, true);
+  });
+
+  it("rejects invalid sizing and preserves basic formatting on ExcelApi 1.1 hosts", async () => {
+    for (const format of [{ columnWidth: -1 }, { columnWidth: Infinity }, { columnWidth: "12" }, { rowHeight: 410 }, { rowHeight: NaN }, { autoFitRows: false }, { columnWidth: 100, autoFitColumns: true }, { rowHeight: 20, autoFitRows: true }]) {
+      const { call, model } = fixture("excel");
+      const before = (await call("read_range_format", target)).data;
+      assert.equal((await call("format_range", { ...target, readToken: before.readToken, format })).code, "INVALID_EDIT");
+      assert.equal(model.writes, 0);
+    }
+    const { call, model } = fixture("excel", undefined, (_name, version) => version === "1.1");
+    const before = (await call("read_range_format", target)).data;
+    assert.equal(Object.hasOwn(before.format, "columnWidths"), false);
+    assert.equal((await call("format_range", { ...target, readToken: before.readToken, format: { columnWidth: 100 } })).code, "UNSUPPORTED_API");
+    assert.equal(model.writes, 0);
+    assert.equal((await call("format_range", { ...target, readToken: before.readToken, format: { font: { bold: true } } })).ok, true);
+  });
+
   it("creates sheets from a current worksheet-list token and rejects changed lists and invalid names", async () => {
     const { call, model, session } = fixture("excel");
     const before = (await call("list_worksheets")).data;

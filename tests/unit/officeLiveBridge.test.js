@@ -225,8 +225,14 @@ describe("Live Office bridge", () => {
         assert.equal((await call("excel_inspect_worksheet", { worksheetId: "sheet-id" })).structuredContent.usedRange.rowCount, 1);
         assert.equal((await call("excel_search_range", { ...target, query: "1" })).structuredContent.matches[0].address, "A1");
         const read = (await call("excel_read_range_format", target)).structuredContent;
-        const result = await call("excel_format_range", { ...target, readToken: read.readToken, format: { numberFormat: "0.00", font: { bold: true } } });
+        const result = await call("excel_format_range", { ...target, readToken: read.readToken, format: { numberFormat: "0.00", font: { bold: true }, columnWidth: 120, rowHeight: 30 } });
         assert.equal(result.structuredContent.format.font.bold, true);
+        assert.deepEqual(result.structuredContent.format.columnWidths, [120]);
+        assert.deepEqual(result.structuredContent.format.rowHeights, [30]);
+        for (const format of [{ columnWidth: -1 }, { rowHeight: 410 }, { columnWidth: 100, autoFitColumns: true }, { autoFitRows: false }]) assert.equal((await call("excel_format_range", { ...target, readToken: result.structuredContent.readToken, format })).isError, true);
+        const fitted = await call("excel_format_range", { ...target, readToken: result.structuredContent.readToken, format: { autoFitColumns: true, autoFitRows: true } });
+        assert.equal(fitted.structuredContent.applied, true);
+        assert.deepEqual(fitted.structuredContent.format.columnWidths, [7]);
         assert.equal((await call("excel_format_range", { ...target, readToken: result.structuredContent.readToken, format: { arbitrary: true } })).isError, true);
         const sheets = (await call("excel_list_worksheets")).structuredContent;
         assert.equal((await call("excel_create_worksheet", { readToken: sheets.readToken, name: "Review" })).structuredContent.name, "Review");

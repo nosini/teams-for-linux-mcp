@@ -377,16 +377,19 @@ or accepts/rejects revisions implicitly.
 
 Font options are bold, italic, font name, size and RGB color. Word additionally
 supports paragraph styles and alignment; Excel supports number formats, fill
-color, alignment and wrapping. Mixed formatting may return null or empty
-properties. Only explicitly supplied formatting properties change.
+color, alignment, wrapping, column widths and row heights. Mixed formatting
+may return null or empty properties. Only explicitly supplied formatting properties change.
 
-Excel worksheet layout is not yet exposed: agents cannot read or change column
-widths, row heights, merged cells, borders, gridline visibility, zoom or print
-settings through the Office bridge. Matching another worksheet's fonts and
-colors therefore does not reproduce its complete layout. These capabilities
-still need to be added. Until then, complete layout changes in Excel itself or
-with a local Office tool after downloading the current cloud version; take
-care to preserve other editors' changes when uploading it again.
+Agents can read individual column widths and row heights, set them in points,
+or use AutoFit to size them to the contents of a selected rectangle. Width
+changes affect the entire intersecting columns; height changes affect the
+entire intersecting rows. For example, an agent can widen the description
+column or fit a table's columns to its labels. Formatting tokens check each
+column and row size, including ranges with mixed sizes.
+
+Merged cells, borders, gridline visibility, zoom and print settings remain
+outside the bridge's tools. Matching fonts, colors and cell sizes therefore
+does not reproduce every part of a worksheet's layout.
 
 Write tokens expire after two minutes and are consumed on attempted writes.
 Formatting edits require a formatting-inspection token; comment and revision
@@ -397,7 +400,8 @@ before trying again.
 
 New Word tools use WordApi 1.6, matching the existing Word requirement. Excel
 used-range inspection and row/column insertion require ExcelApi 1.4; other new
-Excel tools use ExcelApi 1.1. Unsupported hosts return a clear error. See the
+Excel tools use ExcelApi 1.1. Sizing requires ExcelApi 1.2; basic formatting
+continues to work on 1.1 hosts. Unsupported hosts return a clear error. See the
 [tool reference](development/office-mcp.md#extended-live-document-tools) for
 names, arguments and limits. The new tools have automated and simulated
 Electron coverage; real Office compatibility still needs live testing.

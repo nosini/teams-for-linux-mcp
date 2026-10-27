@@ -97,8 +97,10 @@ app.whenReady().then(async () => {
         const found = await bridge.execute(id, "search_range", { ...target, query: "1+2", searchIn: "formulas" });
         assert.equal(found.matches[0].address, "A1");
         const format = await bridge.execute(id, "read_range_format", target);
-        const formatted = await bridge.execute(id, "format_range", { ...target, readToken: format.readToken, format: { numberFormat: "0.00", font: { bold: true } } });
+        const formatted = await bridge.execute(id, "format_range", { ...target, readToken: format.readToken, format: { numberFormat: "0.00", font: { bold: true }, columnWidth: 120, rowHeight: 30 } });
         assert.equal(formatted.format.font.bold, true);
+        assert.deepEqual(formatted.format.columnWidths, [120]);
+        assert.deepEqual(formatted.format.rowHeights, [30]);
         assert.deepEqual(formatted.values, [[3]]);
         const layout = await bridge.execute(id, "inspect_worksheet", { worksheetId: target.worksheetId });
         assert.equal((await bridge.execute(id, "insert_rows_columns", { worksheetId: target.worksheetId, readToken: layout.readToken, axis: "rows", index: 0, count: 1 })).applied, true);

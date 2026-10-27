@@ -34,6 +34,8 @@
       if (key === "numberFormat") return short(value, 256);
       if (key === "fillColor") return color(value);
       if (key === "wrapText") return typeof value === "boolean";
+      if (key === "columnWidth" || key === "rowHeight") return Number.isFinite(value) && value >= 0 && (key !== "rowHeight" || value <= 409) && !Object.hasOwn(format, key === "columnWidth" ? "autoFitColumns" : "autoFitRows");
+      if (key === "autoFitColumns" || key === "autoFitRows") return value === true && !Object.hasOwn(format, key === "autoFitColumns" ? "columnWidth" : "rowHeight");
       if (key === "horizontalAlignment") return excelAlignments.includes(value);
       return key === "verticalAlignment" && ["Top", "Center", "Bottom", "Justify", "Distributed"].includes(value);
     });
@@ -58,7 +60,7 @@
   }
   const fontData = (font) => Object.fromEntries(["bold", "italic", "name", "size", "color"].map((key) => [key, font[key]]));
   const wordFormat = (paragraph) => ({ style: paragraph.style, styleBuiltIn: paragraph.styleBuiltIn, alignment: paragraph.alignment, font: fontData(paragraph.font) });
-  const rangeFormat = (range) => ({ numberFormat: range.numberFormat, font: fontData(range.format.font), fillColor: range.format.fill.color, horizontalAlignment: range.format.horizontalAlignment, verticalAlignment: range.format.verticalAlignment, wrapText: range.format.wrapText });
+  const rangeFormat = (range, dimensions) => ({ ...dimensions, numberFormat: range.numberFormat, font: fontData(range.format.font), fillColor: range.format.fill.color, horizontalAlignment: range.format.horizontalAlignment, verticalAlignment: range.format.verticalAlignment, wrapText: range.format.wrapText });
   const wordLoads = "uniqueLocalId,text,style,styleBuiltIn,alignment,font/bold,font/italic,font/name,font/size,font/color";
   const rangeLoads = "values,formulas,text,rowCount,columnCount,numberFormat,format/font/bold,format/font/italic,format/font/name,format/font/size,format/font/color,format/fill/color,format/horizontalAlignment,format/verticalAlignment,format/wrapText";
   const usedData = (used) => used.isNullObject ? null : Object.fromEntries(["address", "rowIndex", "columnIndex", "rowCount", "columnCount"].map((key) => [key, used[key]]));
@@ -69,6 +71,8 @@
     if (!validate("excel", operation, args) || !bounded(args)) fail("INVALID_EDIT");
     session.requireApi("ExcelApi", operation === "inspect_worksheet" || operation === "insert_rows_columns" ? "1.4" : "1.1");
     if (operation !== "create_worksheet" && !short(args.worksheetId)) fail("WRONG_SHEET");
+    const sizingSupported = session.isSetSupported("ExcelApi", "1.2");
+    if (operation === "format_range" && ["columnWidth", "rowHeight", "autoFitColumns", "autoFitRows"].some((key) => Object.hasOwn(args.format, key))) session.requireApi("ExcelApi", "1.2");
     const expected = ["format_range", "create_worksheet", "insert_rows_columns"].includes(operation) ? session.consume(args.readToken) : null;
     if (operation === "create_worksheet") {
       if (expected.kind !== "worksheets") fail("STALE_STRUCTURE");
@@ -113,6 +117,19 @@
       }
       const shape = rangeShape(args.address);
       const range = sheet.getRange(shape.address);
+      // Inspect each dimension separately: an aggregate null for mixed sizes
+      // would otherwise miss coauthor changes within a mixed-size range.
+      const columns = [], rows = [];
+      if (operation !== "search_range" && sizingSupported) {
+        for (let i = 0; i < shape.columns; i++) columns.push(range.getColumn(i));
+        for (let i = 0; i < shape.rows; i++) rows.push(range.getRow(i));
+      }
+      const loadDimensions = () => {
+        for (const column of columns) column.load("format/columnWidth");
+        for (const row of rows) row.load("format/rowHeight");
+      };
+      const dimensions = () => sizingSupported ? { columnWidths: columns.map((column) => column.format.columnWidth), rowHeights: rows.map((row) => row.format.rowHeight) } : {};
+      loadDimensions();
       range.load(operation === "search_range" ? "text,formulas,rowCount,columnCount,rowIndex,columnIndex" : rangeLoads);
       await context.sync(); session.check(request);
       if (sheet.id !== args.worksheetId) fail("WRONG_SHEET");
@@ -133,18 +150,21 @@
         if (!bounded(result)) fail("TOO_LARGE");
         return result;
       }
-      let format = rangeFormat(range);
+      let format = rangeFormat(range, dimensions());
       if (operation === "format_range") {
         if (expected.kind !== "rangeFormat" || expected.worksheetId !== sheet.id || expected.address !== shape.address || !same(expected.format, format) || !same(expected.values, range.values) || !same(expected.formulas, range.formulas)) fail("STALE_READ");
         const input = args.format;
         if (input.font) Object.assign(range.format.font, input.font);
         if (input.fillColor) range.format.fill.color = input.fillColor;
-        for (const key of ["horizontalAlignment", "verticalAlignment", "wrapText"]) if (Object.hasOwn(input, key)) range.format[key] = input[key];
+        for (const key of ["horizontalAlignment", "verticalAlignment", "wrapText", "columnWidth", "rowHeight"]) if (Object.hasOwn(input, key)) range.format[key] = input[key];
         if (input.numberFormat) range.numberFormat = Array.from({ length: shape.rows }, () => Array(shape.columns).fill(input.numberFormat));
+        if (input.autoFitColumns) range.format.autofitColumns();
+        if (input.autoFitRows) range.format.autofitRows();
         await context.sync();
         range.load(rangeLoads);
+        loadDimensions();
         await context.sync(); session.check(request);
-        format = rangeFormat(range);
+        format = rangeFormat(range, dimensions());
       }
       return session.rememberBounded({ kind: "rangeFormat", worksheetId: sheet.id, address: shape.address, values: range.values, formulas: range.formulas, text: range.text, format, ...(operation === "format_range" ? { applied: true } : {}) });
     });
