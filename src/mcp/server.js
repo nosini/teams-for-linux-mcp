@@ -2,15 +2,20 @@ const { McpServer } = require("@modelcontextprotocol/server");
 const { z } = require("zod");
 const { validateData } = require("../office/addin/operations");
 const { validateText } = require("../office/addin/wordOperations");
-const { documentId, worksheetId, paragraphId, address } = require("./officeSchemas");
+const { documentId, worksheetId, paragraphId, address, responseMode } = require("./officeSchemas");
 const { registerJsonTool } = require("./tools");
 
 function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null, surfaceInspector = null, codeMirrorBridge = null, documentTabs = null) {
   const server = new McpServer({ name: "teams-for-linux-office", version: "0.1.0" }, {
-    instructions: liveBridge ? "List connected documents first and choose tools matching the application. Excel writes require a read token from the same worksheet and range. Word text edits require a read token from the same paragraph; literal replacements require exactly one matching occurrence. Formatting and structure tools specify their own inspection tokens. Inspect comments/revisions before explicitly editing them; do not automatically change tracking mode or accept/reject changes. Do not automatically retry a timed-out write. API presence diagnostics alone do not indicate a live bridge. To create a Word file without a pasted link, discover its folder with office_list_locations and call office_create_document; Electron creates it, opens it hidden and starts Bridge setup. For another existing folder, use office_resolve_location with a source location, decoded folderPath and optional owning webUrl, or browse office_list_location_folders. Inspect an uncertain creation with office_list_location_files before retrying." : "This server discovers Office frames in Teams. API presence is diagnostic only. Channel file tools, when enabled, use the signed-in Teams session. List teams, channels and files before choosing a file. Do not automatically retry timed-out writes.",
+    instructions: liveBridge ? "List connected documents first and choose tools matching the application. Excel writes require a read token from the same worksheet and range. Word text edits require a read token from the same paragraph; literal replacements require exactly one matching occurrence. Formatting and structure tools specify their own inspection tokens. Tokens last fifteen minutes; unchanged Word paragraphs keep their tokens after other paragraphs are edited. Prefer word_batch_edit/excel_batch_edit for multiple inspected edits and word_insert_paragraphs for sections. Use compact responses by default. Successful writes return fresh tokens; do not reread merely to confirm an applied write. Read relevant ranges/pages once and reuse their tokens. Coauthor comparisons and writes are not atomic. Inspect comments/revisions before explicitly editing them; do not automatically change tracking mode or accept/reject changes. Do not automatically retry a timed-out write. API presence diagnostics alone do not indicate a live bridge. To create a Word file without a pasted link, discover its folder with office_list_locations and call office_create_document; Electron creates it, opens it hidden and starts Bridge setup. For another existing folder, use office_resolve_location with a source location, decoded folderPath and optional owning webUrl, or browse office_list_location_folders. Inspect an uncertain creation with office_list_location_files before retrying." : "This server discovers Office frames in Teams. API presence is diagnostic only. Channel file tools, when enabled, use the signed-in Teams session. List teams, channels and files before choosing a file. Do not automatically retry timed-out writes.",
   });
+  const batchDefinitions = [];
   // Every tool here acts on the local Teams client, not Microsoft services.
-  const tool = (name, options, operation) => registerJsonTool(server, name, { ...options, openWorld: false }, operation);
+  const tool = (name, options, operation) => {
+    const definition = registerJsonTool(server, name, { ...options, openWorld: false }, operation);
+    if (options.writing) batchDefinitions.push(definition);
+    return definition;
+  };
 
   tool("office_list_editors", {
     description: "List candidate Word/Excel frames and SharePoint document wrappers in the running Teams client. Returns temporary IDs and origins, without document content or full URLs.",
@@ -28,7 +33,7 @@ function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null
       inputSchema: z.object({}).strict(),
     }, () => liveBridge.listDocuments());
     tool("word_read_paragraphs", {
-      description: "Read a page of main-body Word paragraphs with session-local paragraph IDs, text and single-use two-minute read tokens. start is a zero-based discovery offset; use paragraph IDs for edits. Pages can shift during coauthoring. Returns nextStart, or null at the end. Headers, footers and text boxes are outside this scope. Requires WordApi 1.6.",
+      description: "Read a page of main-body Word paragraphs with session-local paragraph IDs, text and single-use fifteen-minute read tokens. start is a zero-based discovery offset; use paragraph IDs for edits. Pages can shift during coauthoring. Returns nextStart, or null at the end. Headers, footers and text boxes are outside this scope. Requires WordApi 1.6.",
       inputSchema: z.object({ documentId, start: z.number().int().min(0).max(100000).default(0), count: z.number().int().min(1).max(50).default(20) }).strict(),
     }, ({ documentId: id, ...args }) => liveBridge.execute(id, "read_paragraphs", args));
     tool("word_read_paragraph", {
@@ -37,7 +42,7 @@ function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null
     }, ({ documentId: id, ...args }) => liveBridge.execute(id, "read_paragraph", args));
     tool("word_replace_text", {
       description: "Replace exactly one case-sensitive literal text match inside an explicitly selected Word paragraph. Requires a recent read token for unchanged paragraph text. findText is 1–255 characters without caret codes; replacementText is at most 8,192 characters, with an empty string deleting the match. Control characters and paragraph breaks are rejected. Edits only the matched range; replacement formatting follows Word. Coauthor comparison and replacement are not atomic. Read again after uncertain writes.",
-      inputSchema: z.object({ documentId, paragraphId, readToken: z.string().uuid(), findText: z.string().min(1).max(255), replacementText: z.string().max(8192) }).strict()
+      inputSchema: z.object({ documentId, paragraphId, readToken: z.string().uuid(), findText: z.string().min(1).max(255), replacementText: z.string().max(8192), responseMode }).strict()
         .refine((args) => { try { validateText(args.findText, args.replacementText); return true; } catch { return false; } }, "Use bounded literal text without caret search codes or paragraph/control characters."),
       writing: true,
     }, ({ documentId: id, ...args }) => liveBridge.execute(id, "replace_text", args));
@@ -46,8 +51,8 @@ function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null
       inputSchema: z.object({ documentId }).strict(),
     }, ({ documentId: id }) => liveBridge.execute(id, "list_worksheets", {}));
     tool("excel_read_range", {
-      description: "Read values, formulas and displayed text from an A1 rectangle of up to 1,000 cells, addressed by worksheet ID. Returns a single-use read token valid for two minutes, required for writes to this exact range.",
-      inputSchema: z.object({ documentId, worksheetId, address }).strict(),
+      description: "Read up to 1,000 cells and a single-use fifteen-minute token for this exact range. Compact default: values matrix; formulaCells and textCells contain only differences as [zero-based row offset, column offset, formula/display text]. Missing entries use values (displayed as strings). responseMode: full returns dense values, formulas and text matrices.",
+      inputSchema: z.object({ documentId, worksheetId, address, responseMode }).strict(),
     }, ({ documentId: id, ...args }) => liveBridge.execute(id, "read_range", args));
     for (const [name, operation, description] of [
       ["excel_write_range", "write_range", "Write literal values to a range. Use numbers, booleans or strings; an empty string clears a cell. Text beginning with =, + or - is rejected. Requires a recent read token; rejects changed cells. The comparison and write are not atomic against coauthors."],
@@ -56,7 +61,7 @@ function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null
       tool(name, {
         description,
         inputSchema: z.object({
-          documentId, worksheetId, address, readToken: z.string().uuid(),
+          documentId, worksheetId, address, readToken: z.string().uuid(), responseMode,
           data: z.array(z.array(z.union([z.string().max(8192), z.number().finite(), z.boolean()])).min(1).max(1000)).min(1).max(1000),
         }).strict().refine((args) => {
           try { validateData(args.address, args.data, operation === "set_formulas"); return true; } catch { return false; }
@@ -76,7 +81,10 @@ function createOfficeMcpServer(inspector, liveBridge = null, channelFiles = null
       errorMessage: () => "Select an inspectable frame from editor_list_frames again.",
     }, ({ frameId }) => surfaceInspector.inspectFrame(frameId));
   }
-  if (liveBridge) require("./editingTools").registerEditingTools(server, liveBridge);
+  if (liveBridge) {
+    batchDefinitions.push(...require("./editingTools").registerEditingTools(server, liveBridge));
+    require("./batchTools").registerBatchTools(server, batchDefinitions);
+  }
   if (channelFiles) require("./channelFiles").registerChannelFileTools(server, channelFiles);
   if (codeMirrorBridge) require("./codeMirrorTools").registerCodeMirrorTools(server, codeMirrorBridge);
   if (documentTabs) require("./documentTabTools").registerDocumentTabTools(server, documentTabs);

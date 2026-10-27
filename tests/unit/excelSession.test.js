@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
-const { ExcelSession, rangeShape, validateData } = require("../../app/office/addin/operations");
+const { ExcelSession, rangeShape, validateData, readTokenLifetime } = require("../../app/office/addin/operations");
 const { excelFixture } = require("../fixtures/excelApi");
 
 function fixture(initial) {
@@ -25,7 +25,8 @@ describe("Excel live session", () => {
     const result = await call("write_range", { ...target, readToken: before.data.readToken, data: [[7]] });
     assert.equal(result.ok, true);
     assert.equal(result.data.applied, true);
-    assert.deepEqual(result.data.values, [[7]]);
+    assert.equal(Object.hasOwn(result.data, "values"), false);
+    assert.deepEqual(model.values, [[7]]);
     assert.notEqual(result.data.readToken, before.data.readToken);
     assert.equal(model.writes, 1);
     assert.equal((await call("write_range", { ...target, readToken: before.data.readToken, data: [[9]] })).code, "STALE_READ");
@@ -53,7 +54,7 @@ describe("Excel live session", () => {
       if (change === "url") state.url = "https://tenant.sharepoint.com/other.xlsx";
       if (change === "sheet") args.worksheetId = "other-id";
       if (change === "range") args.address = "B1";
-      if (change === "expiry") state.now += 120000; // Exactly at expiry, as for structure tokens.
+      if (change === "expiry") state.now += readTokenLifetime;
       const result = await call("write_range", args, overrides);
       assert.equal(result.ok, false, change);
       if (change !== "document" && change !== "url") assert.equal(result.code, "STALE_READ", change);
@@ -67,7 +68,7 @@ describe("Excel live session", () => {
     for (const value of ["=1+2", "+1+2", "-1+2"]) {
       assert.equal((await call("write_range", { ...target, readToken: data.readToken, data: [[value]] })).code, "INVALID_DATA");
     }
-    const result = await call("set_formulas", { ...target, readToken: data.readToken, data: [["=1+2"]] });
+    const result = await call("set_formulas", { ...target, readToken: data.readToken, data: [["=1+2"]], responseMode: "full" });
     assert.equal(result.ok, true);
     assert.deepEqual(model.formulas, [["=1+2"]]);
     assert.deepEqual(result.data.values, [[3]]);

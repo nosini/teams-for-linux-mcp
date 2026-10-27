@@ -10,6 +10,7 @@ function wordFixture(texts = ["Hello from Word.", "A second paragraph."]) {
     })),
     tables: [], trackingMode: "Off", syncs: 0, writes: 0, beforeSync: null, lastPage: null, searchOverride: null,
   };
+  let nextParagraphId = model.paragraphs.length + 1;
   const word = {
     async run(callback) {
       let queued = [];
@@ -46,7 +47,7 @@ function wordFixture(texts = ["Hello from Word.", "A second paragraph."]) {
             };
           },
           insertParagraph(text, position) {
-            const newId = `10000000-0000-4000-8000-${String(model.paragraphs.length + 1).padStart(12, "0")}`;
+            const newId = `10000000-0000-4000-8000-${String(nextParagraphId++).padStart(12, "0")}`;
             enqueue(() => {
               const item = find(id), index = model.paragraphs.indexOf(item);
               model.paragraphs.splice(index + (position === "After" ? 1 : 0), 0, { ...item, id: newId, text, font: { ...item.font }, comments: [], changes: [] });

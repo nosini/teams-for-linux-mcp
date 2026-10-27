@@ -2,6 +2,7 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const { WordSession, validateText } = require("../../app/office/addin/wordOperations");
+const { readTokenLifetime } = require("../../app/office/addin/operations");
 const { wordFixture } = require("../fixtures/wordApi");
 
 function fixture(texts) {
@@ -22,9 +23,10 @@ describe("Word live session", () => {
       await call(operation, { start: 50, count: 50 });
       const result = await call("replace_text", { ...first[10], findText: "Paragraph", replacementText: "Updated" });
       assert.equal(result.ok, true);
-      assert.equal(result.data.text, "Updated 10");
+      assert.equal(Object.hasOwn(result.data, "text"), false);
+      assert.equal(session.snapshots.get(result.data.readToken).text, "Updated 10");
       assert.equal((await call("replace_text", { ...first[10], findText: "Updated", replacementText: "Again" })).code, "STALE_PARAGRAPH");
-      state.now += 120000;
+      state.now += readTokenLifetime;
       await call("read_paragraphs", { count: 1 });
       assert.equal(session.snapshots.size, 1, "Expired snapshots are pruned before issuing new tokens");
     }
@@ -51,7 +53,8 @@ describe("Word live session", () => {
     const result = await call("replace_text", { ...before, findText: "Hello", replacementText: "Greetings" });
     assert.equal(result.ok, true);
     assert.equal(result.data.applied, true);
-    assert.equal(result.data.text, "Greetings from Word.");
+    assert.equal(Object.hasOwn(result.data, "text"), false);
+    assert.equal(model.paragraphs[0].text, "Greetings from Word.");
     assert.equal(model.paragraphs[1].text, "A second paragraph.");
     assert.deepEqual(model.paragraphs[0].formatting, { outsideMatch: "preserved" });
     assert.equal(model.searchOptions.matchWildcards, false);
@@ -59,7 +62,7 @@ describe("Word live session", () => {
     assert.notEqual(result.data.readToken, before.readToken);
     assert.equal((await call("replace_text", { ...before, findText: "Greetings", replacementText: "Again" })).code, "STALE_PARAGRAPH");
     assert.equal(model.writes, 1);
-    const deleted = await call("replace_text", { ...result.data, findText: "Greetings ", replacementText: "" });
+    const deleted = await call("replace_text", { ...result.data, findText: "Greetings ", replacementText: "", responseMode: "full" });
     assert.equal(deleted.data.text, "from Word.");
   });
 
@@ -107,7 +110,7 @@ describe("Word live session", () => {
       if (change === "paragraph") before.paragraphId = model.paragraphs[1].id;
       if (change === "document") overrides.documentId = randomUUID();
       if (change === "url") state.url += "?other-document";
-      if (change === "expiry") state.now += 120000;
+      if (change === "expiry") state.now += readTokenLifetime;
       assert.equal((await call("replace_text", { ...before, findText: "Hello", replacementText: "Updated" }, overrides)).ok, false, change);
       assert.equal(model.writes, 0);
     }

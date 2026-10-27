@@ -4,7 +4,7 @@
   else root.TeamsOfficeEditing = factory();
 })(globalThis, () => {
   const excelOperations = ["inspect_worksheet", "search_range", "read_range_format", "format_range", "create_worksheet", "insert_rows_columns"];
-  const wordOperations = ["read_structure", "read_paragraph_details", "list_tables", "read_table", "replace_paragraph", "insert_paragraph", "delete_paragraph", "format_paragraph", "read_comments", "add_comment", "reply_comment", "resolve_comment", "get_change_tracking", "set_change_tracking", "read_tracked_changes", "resolve_tracked_change"];
+  const wordOperations = ["read_structure", "read_paragraph_details", "list_tables", "read_table", "replace_paragraph", "insert_paragraph", "insert_paragraphs", "delete_paragraph", "format_paragraph", "read_comments", "add_comment", "reply_comment", "resolve_comment", "get_change_tracking", "set_change_tracking", "read_tracked_changes", "resolve_tracked_change"];
   const styles = ["Normal", "Title", "Subtitle", ...Array.from({ length: 9 }, (_, i) => `Heading${i + 1}`), "Quote", "Caption", "ListParagraph"];
   const trackingModes = ["Off", "TrackAll", "TrackMineOnly"];
   const wordAlignments = ["Left", "Centered", "Right", "Justified"];
@@ -50,6 +50,7 @@
     if (["format_range", "format_paragraph"].includes(operation) && !validFormat(args.format, application)) return false;
     if (["replace_paragraph", "insert_paragraph"].includes(operation) && !paragraphText(args.text)) return false;
     if (operation === "insert_paragraph" && (!["Before", "After"].includes(args.position) || (args.styleBuiltIn !== undefined && !styles.includes(args.styleBuiltIn)))) return false;
+    if (operation === "insert_paragraphs" && (!["Before", "After"].includes(args.position) || !Array.isArray(args.paragraphs) || args.paragraphs.length < 1 || args.paragraphs.length > 20 || !args.paragraphs.every((paragraph) => plain(paragraph) && Object.keys(paragraph).every((key) => ["text", "styleBuiltIn"].includes(key)) && paragraphText(paragraph.text) && (paragraph.styleBuiltIn === undefined || styles.includes(paragraph.styleBuiltIn))))) return false;
     if (["add_comment", "reply_comment"].includes(operation) && !(short(args.text, 4096))) return false;
     if (operation === "resolve_comment" && typeof args.resolved !== "boolean") return false;
     if (operation === "set_change_tracking" && !trackingModes.includes(args.mode)) return false;
@@ -166,7 +167,7 @@
         await context.sync(); session.check(request);
         format = rangeFormat(range, dimensions());
       }
-      return session.rememberBounded({ kind: "rangeFormat", worksheetId: sheet.id, address: shape.address, values: range.values, formulas: range.formulas, text: range.text, format, ...(operation === "format_range" ? { applied: true } : {}) });
+      return session.rememberResult({ kind: "rangeFormat", worksheetId: sheet.id, address: shape.address, values: range.values, formulas: range.formulas, text: range.text, format, ...(operation === "format_range" ? { applied: true } : {}) }, args);
     });
   }
 
@@ -220,6 +221,21 @@
       if (paragraph.uniqueLocalId !== args.paragraphId) fail("WRONG_PARAGRAPH");
       if (writing && (expected.paragraphId !== args.paragraphId || expected.text !== paragraph.text)) fail("STALE_PARAGRAPH");
       if (operation === "read_paragraph_details") return session.rememberBounded({ kind: "paragraphFormat", paragraphId: paragraph.uniqueLocalId, text: paragraph.text, format: wordFormat(paragraph) });
+      if (operation === "insert_paragraphs") {
+        if (![undefined, "paragraphFormat"].includes(expected.kind)) fail("STALE_PARAGRAPH");
+        const inserted = [];
+        let anchor = paragraph;
+        for (const item of args.paragraphs) {
+          const next = anchor.insertParagraph(item.text, args.position);
+          if (item.styleBuiltIn) next.styleBuiltIn = item.styleBuiltIn;
+          next.load("uniqueLocalId,text");
+          inserted.push(next);
+          if (args.position === "After") anchor = next;
+        }
+        await context.sync(); session.check(request);
+        session.invalidateParagraph(args.paragraphId);
+        return session.boundedResult({ applied: true, paragraphs: inserted.map((item) => session.snapshot(item, args, true)) });
+      }
       if (["read_comments", "reply_comment", "resolve_comment"].includes(operation)) {
         const comments = paragraph.getComments();
         // Resolve by stable comment ID, never by the current collection index.
@@ -280,7 +296,8 @@
         await context.sync();
         paragraph.load(wordLoads);
         await context.sync(); session.check(request);
-        return session.rememberBounded({ kind: "paragraphFormat", paragraphId: args.paragraphId, text: paragraph.text, format: wordFormat(paragraph), applied: true });
+        session.invalidateParagraph(args.paragraphId);
+        return session.rememberResult({ kind: "paragraphFormat", paragraphId: args.paragraphId, text: paragraph.text, format: wordFormat(paragraph), applied: true }, args);
       }
       if (![undefined, "paragraphFormat"].includes(expected.kind)) fail("STALE_PARAGRAPH");
       if (operation === "replace_paragraph") paragraph.getRange("Content").insertText(args.text, "Replace");
@@ -290,15 +307,15 @@
         if (args.styleBuiltIn) inserted.styleBuiltIn = args.styleBuiltIn;
         inserted.load("uniqueLocalId,text");
         await context.sync(); session.check(request);
-        session.snapshots.clear();
-        return { ...session.snapshot(inserted), applied: true };
+        session.invalidateParagraph(args.paragraphId);
+        return session.snapshot(inserted, args, true);
       } else fail("WORD_ERROR");
       await context.sync(); session.check(request);
-      session.snapshots.clear();
+      session.invalidateParagraph(args.paragraphId);
       if (operation === "delete_paragraph") return { applied: true, paragraphId: args.paragraphId };
       paragraph.load("uniqueLocalId,text");
       await context.sync(); session.check(request);
-      return { ...session.snapshot(paragraph), applied: true };
+      return session.snapshot(paragraph, args, true);
     });
   }
   return { excelOperations, wordOperations, executeExcel, executeWord, validate, validFormat, paragraphText, validName, styles, trackingModes, wordAlignments, excelAlignments };

@@ -391,10 +391,23 @@ Merged cells, borders, gridline visibility, zoom and print settings remain
 outside the bridge's tools. Matching fonts, colors and cell sizes therefore
 does not reproduce every part of a worksheet's layout.
 
-Write tokens expire after two minutes and are consumed on attempted writes.
+Agents can group up to 20 inspected edits into `word_batch_edit` or
+`excel_batch_edit`, and add up to 20 paragraphs with `word_insert_paragraphs`.
+This reduces the number of agent turns needed for a document. A batch stops at
+the first failed edit and reports which earlier edits completed; those edits
+are not rolled back. The agent must inspect an uncertain edit before retrying it.
+
+Responses are compact by default. Excel formatting reads return formatting;
+successful writes return identifiers and fresh tokens. Agents can request
+`responseMode: "full"` when they need the complete resulting content. This
+keeps repeated document content out of the conversation during routine edits.
+
+Office write tokens expire after fifteen minutes and are consumed on attempted writes.
 Formatting edits require a formatting-inspection token; comment and revision
-edits require their own review tokens. Structural operations and revision
-resolution invalidate earlier document tokens. Coauthor edits can still occur
+edits require their own review tokens. Word paragraph edits preserve tokens for
+other paragraphs, which are still compared with live content before use.
+Excel structural operations, tracking-mode changes and revision resolution
+invalidate earlier document tokens. Coauthor edits can still occur
 between comparison and writing. Inspect results after an uncertain write
 before trying again.
 

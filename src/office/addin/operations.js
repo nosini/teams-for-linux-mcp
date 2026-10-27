@@ -40,8 +40,34 @@
     if (rows < 1 || columns < 1 || right > 16384 || bottom > 1048576 || rows * columns > 1000) fail("INVALID_RANGE");
     return { rows, columns, address: address.toUpperCase() };
   }
-  function bounded(value) {
-    return new TextEncoder().encode(JSON.stringify(value)).length <= 32768;
+  function bounded(value, limit = 32768) {
+    return new TextEncoder().encode(JSON.stringify(value)).length <= limit;
+  }
+  const readTokenLifetime = 15 * 60 * 1000;
+
+  // Keep full comparison snapshots in the pane, not in the model's context.
+  // Sparse entries are [zero-based row offset, column offset, value].
+  function projectResult(result, args = {}) {
+    if (args.responseMode === "full") return result;
+    if (result.applied) return Object.fromEntries(["paragraphId", "worksheetId", "address", "readToken", "applied"].filter((key) => Object.hasOwn(result, key)).map((key) => [key, result[key]]));
+    if (!result.values) return result;
+    const { formulas, text, format, ...compact } = result;
+    const formulaCells = [], textCells = [];
+    for (let row = 0; !format && row < result.values.length; row++) {
+      for (let column = 0; column < result.values[row].length; column++) {
+        const value = result.values[row][column];
+        if (formulas?.[row]?.[column] !== undefined && formulas[row][column] !== value) formulaCells.push([row, column, formulas[row][column]]);
+        if (text?.[row]?.[column] !== undefined && text[row][column] !== String(value ?? "")) textCells.push([row, column, text[row][column]]);
+      }
+    }
+    if (formulaCells.length) compact.formulaCells = formulaCells;
+    if (textCells.length) compact.textCells = textCells;
+    if (format) {
+      delete compact.values;
+      const first = format.numberFormat?.[0]?.[0];
+      compact.format = { ...format, numberFormat: first !== undefined && format.numberFormat.every((row) => row.every((value) => value === first)) ? first : format.numberFormat };
+    }
+    return compact;
   }
   function validateData(address, data, formulas = false) {
     const { rows, columns } = rangeShape(address);
@@ -79,6 +105,14 @@
 
     requireApi(name, version) { if (!this.isSetSupported(name, version)) fail("UNSUPPORTED_API"); }
 
+    validateResponseMode(args) {
+      if (args.responseMode !== undefined && !["compact", "full"].includes(args.responseMode)) fail("INVALID_EDIT");
+    }
+
+    invalidateParagraph(paragraphId) {
+      for (const [token, snapshot] of this.snapshots) if (snapshot.paragraphId === paragraphId) this.snapshots.delete(token);
+    }
+
     // A write attempt consumes the token even if its outcome is uncertain.
     consume(readToken, code = "STALE_STRUCTURE") {
       const expected = this.snapshots.get(readToken);
@@ -93,12 +127,20 @@
       return this.remember(result);
     }
 
+    rememberResult(result, args = {}) {
+      // Four dense matrices can exceed the size of their compact projection.
+      // Bound both retained state and the response before issuing a token.
+      if (!bounded(result, 131072)) fail("TOO_LARGE");
+      this.boundedResult(projectResult({ ...result, readToken: "0".repeat(36) }, args));
+      return projectResult(this.remember(result), args);
+    }
+
     remember(result) {
       const now = this.now();
-      const saved = JSON.parse(JSON.stringify({ ...result, expires: now + 120000 }));
+      const saved = JSON.parse(JSON.stringify({ ...result, expires: now + readTokenLifetime }));
       for (const [token, snapshot] of this.snapshots) if (snapshot.expires <= now) this.snapshots.delete(token);
       // A Word page can issue 50 tokens. Keep multiple pages available while
-      // retaining a hard per-document bound and the two-minute expiry.
+      // retaining a hard per-document bound and a fifteen-minute expiry.
       while (this.snapshots.size >= 512) this.snapshots.delete(this.snapshots.keys().next().value);
       const readToken = this.randomUUID();
       this.snapshots.set(readToken, saved);
@@ -109,14 +151,14 @@
   class ExcelSession extends OfficeSession {
     constructor(excel, options) { super(options); this.excel = excel; }
 
-    snapshot(range, args) {
+    snapshot(range, args, applied = false) {
       const result = {
         worksheetId: args.worksheetId, address: args.address.toUpperCase(),
         values: range.values, formulas: range.formulas, text: range.text,
+        ...(applied ? { applied: true } : {}),
       };
-      if (!bounded(result)) fail("TOO_LARGE");
       // Detach from Office's proxy objects and the result returned to callers.
-      return this.remember(result);
+      return this.rememberResult(result, args);
     }
 
     async execute(request) {
@@ -125,6 +167,7 @@
       try {
         this.check(request);
         const { operation, args = {} } = request;
+        this.validateResponseMode(args);
         if (editing.excelOperations.includes(operation)) {
           return { ok: true, data: await editing.executeExcel(this, request, { fail, rangeShape, bounded }) };
         }
@@ -170,7 +213,7 @@
             range.load("values,formulas,text");
             await context.sync();
           }
-          return { ...this.snapshot(range, args), ...(writing ? { applied: true } : {}) };
+          return this.snapshot(range, args, writing);
         });
         return { ok: true, data };
       } catch (error) {
@@ -180,5 +223,5 @@
       }
     }
   }
-  return { OfficeSession, ExcelSession, rangeShape, validateData, bounded, fail, messages, editing };
+  return { OfficeSession, ExcelSession, rangeShape, validateData, bounded, fail, messages, editing, readTokenLifetime };
 });

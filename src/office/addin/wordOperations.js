@@ -18,11 +18,10 @@
   class WordSession extends OfficeSession {
     constructor(word, options) { super(options); this.word = word; }
 
-    snapshot(paragraph) {
+    snapshot(paragraph, args = {}, applied = false) {
       if (!paragraphIdPattern.test(paragraph.uniqueLocalId)) fail("WRONG_PARAGRAPH");
-      const result = { paragraphId: paragraph.uniqueLocalId, text: paragraph.text };
-      if (!bounded({ ...result, readToken: "0".repeat(36) })) fail("TOO_LARGE");
-      return this.remember(result);
+      const result = { paragraphId: paragraph.uniqueLocalId, text: paragraph.text, ...(applied ? { applied: true } : {}) };
+      return this.rememberResult(result, args);
     }
 
     async execute(request) {
@@ -31,6 +30,7 @@
       try {
         this.check(request);
         const { operation, args = {} } = request;
+        this.validateResponseMode(args);
         if (editing.wordOperations.includes(operation)) {
           return { ok: true, data: await editing.executeWord(this, request, { fail, bounded }) };
         }
@@ -82,10 +82,11 @@
             if (matches.items.length !== 1 || matches.items[0].text !== args.findText) fail("AMBIGUOUS_TEXT");
             matches.items[0].insertText(args.replacementText, "Replace");
             await context.sync();
+            this.invalidateParagraph(args.paragraphId);
             paragraph.load("uniqueLocalId,text");
             await context.sync();
           }
-          return { ...this.snapshot(paragraph), ...(writing ? { applied: true } : {}) };
+          return this.snapshot(paragraph, args, writing);
         });
         return { ok: true, data };
       } catch (error) {

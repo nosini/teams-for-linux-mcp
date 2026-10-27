@@ -16,6 +16,7 @@ function registerJsonTool(server, name, { description, inputSchema, writing = fa
     try { return jsonResult(await operation(args)); }
     catch (error) { return toolError(errorMessage(error)); }
   });
+  return { name, inputSchema, operation };
 }
 
 module.exports = { registerJsonTool };

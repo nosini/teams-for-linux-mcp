@@ -14,6 +14,8 @@ through a private Unix socket. Linux only, disabled by default. See the
 - `localEndpoint.js`: the private `mcp/bridge.sock` listener.
 - `server.js`: the MCP server and its diagnostic and live Office tools.
 - `editingTools.js`, `codeMirrorTools.js`: Office editing and CodeMirror tools.
+- `batchTools.js`: bounded sequential Office edit batches using the individual
+  tools' schemas and dispatchers, with explicit partial-completion results.
 - `documentTabTools.js`: background document tab opening, discovery, showing and
   closing. `app/office/documentTabs.js` owns the separate Documents window and
   its sandboxed Office views. Closing the window hides it; individual tab closes

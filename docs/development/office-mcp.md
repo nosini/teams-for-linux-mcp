@@ -408,7 +408,7 @@ were explored but are not part of the implementation.
 | --- | --- |
 | `office_list_documents` | Discover initialized task panes and their temporary document IDs |
 | `excel_list_worksheets` | Get stable worksheet IDs and names for a chosen document |
-| `excel_read_range` | Read values, formulas and displayed text; obtain a read token |
+| `excel_read_range` | Read values and sparse formula/display differences; obtain a read token |
 | `excel_write_range` | Write a matching matrix of literal values using a read token |
 | `excel_set_formulas` | Write a matching matrix of formulas starting with `=` using a read token |
 
@@ -418,7 +418,7 @@ Ranges use A1 rectangles such as `A1` or `B2:D8`, limited to 1,000 cells and a
 empty strings clear cells. Literal text starting with `=`, `+` or `-` is rejected
 to avoid interpreting it as a formula. Use numeric values for negative numbers.
 
-Every read returns a single-use `readToken` valid for two minutes. Writes must
+A cell-range read returns a single-use `readToken` valid for fifteen minutes. Writes must
 include that token, the same worksheet ID and the same range address. The add-in
 reads the cells again and rejects a write if either their values or formulas
 changed. Excel does not provide an atomic compare-and-set, so a coauthor can
@@ -426,8 +426,9 @@ still change cells between the comparison and write. Serialize operations and
 avoid working on the same cells at the same time.
 
 After an uncertain or timed-out write, read the range again rather than retrying
-the old request. A successful write returns its resulting cells and a new read
-token. The bridge does not download and replace the workbook file; Excel handles
+the old request. A successful write returns a new read token and compact
+confirmation; `responseMode: "full"` also returns the resulting cells.
+The bridge does not download and replace the workbook file; Excel handles
 calculation, saving and coauthoring.
 
 For source testing without an agent, call a tool from the terminal:
@@ -482,7 +483,7 @@ valid only within that add-in session. Headers, footers, text boxes and other
 document stories are outside the discovery scope. Large paragraphs may exceed
 the result limit even when read individually.
 
-Each paragraph read returns a two-minute, single-use token. Replacement checks
+Each paragraph read returns a fifteen-minute, single-use token. Replacement checks
 the paragraph's text again after searching and rejects changes or multiple
 matches. Searches are literal and case-sensitive, limited to 255 characters;
 caret codes and control characters are rejected. Replacement is plain text,
@@ -516,7 +517,7 @@ table row can exceed this limit.
 | --- | --- | --- |
 | `excel_inspect_worksheet` | `worksheetId`, optional page | Used bounds, paged structured tables and layout token |
 | `excel_search_range` | `worksheetId`, `address`, `query`, optional `searchIn` (`text`/`formulas`), `matchCase`, `offset` | Up to 50 literal matches; continue with `nextOffset` in the same window |
-| `excel_read_range_format` | `worksheetId`, `address` | Values, formulas, text, number formats, basic formatting, individual column widths/row heights and format token |
+| `excel_read_range_format` | `worksheetId`, `address`, optional `responseMode` | Formatting and a format token; full mode also returns cell content |
 | `excel_format_range` | Same range, `readToken`, `format` | Uniform formatting; checks content and inspected formatting |
 | `excel_create_worksheet` | `name`, `readToken` from `excel_list_worksheets` | New worksheet ID/name/position; checks the sheet list |
 | `excel_insert_rows_columns` | `worksheetId`, `axis` (`rows`/`columns`), `index`, `count`, layout `readToken` | Insert whole rows/columns before a zero-based index |
@@ -567,7 +568,8 @@ for the sizing APIs.
 | `word_list_tables` | Optional page | Main-body table indexes and row counts |
 | `word_read_table` | `tableIndex`, optional `rowStart`, `rowCount` | Paged row/cell text, cell counts and `nextRowStart` |
 | `word_replace_paragraph` | `paragraphId`, ordinary `readToken`, `text` | Replace complete paragraph content, excluding its mark |
-| `word_insert_paragraph` | Anchor `paragraphId`, ordinary `readToken`, `text`, `position` (`Before`/`After`), optional `styleBuiltIn` | New paragraph ID/text/token |
+| `word_insert_paragraph` | Anchor `paragraphId`, ordinary `readToken`, `text`, `position` (`Before`/`After`), optional `styleBuiltIn` | New paragraph ID/token; text in full mode |
+| `word_insert_paragraphs` | Anchor `paragraphId`, ordinary `readToken`, `position`, `paragraphs` array of `{text, styleBuiltIn?}` | Insert 1–20 paragraphs in array order with one token; returns inserted IDs/tokens |
 | `word_delete_paragraph` | `paragraphId`, ordinary `readToken` | Delete paragraph and content; tracking may preserve a revision |
 | `word_format_paragraph` | `paragraphId`, format `readToken`, `format` | Style, alignment and/or font edits |
 | `word_read_comments` | `paragraphId`, optional page | Comment threads/replies and token per thread |
@@ -588,8 +590,9 @@ inspection does not expose table editing.
 Whole-paragraph text is limited to 8,192 characters without paragraph/control
 characters. It bypasses the 255-character search limit but can replace inline
 formatting, links, fields and other rich content. Prefer `word_replace_text` for
-small corrections. Insertion/deletion/whole replacement invalidate earlier pane
-tokens; insertion/replacement return a fresh paragraph token. Word handles
+small corrections. Paragraph edits invalidate tokens for the affected paragraph
+and preserve tokens for other stable paragraph IDs. Their current text is still
+checked before each write. Insertion/replacement return fresh paragraph tokens. Word handles
 saving and tracks edits according to the document's current tracking mode.
 
 Word `format` accepts `style` (localized/custom name) OR `styleBuiltIn`,
@@ -613,10 +616,50 @@ whole ordered list (author, date, text, type), paragraph text and Original/Curre
 reviewed text. Resolution invalidates earlier pane tokens. These checks reduce
 accidental retargeting but cannot lock out coauthors atomically.
 
-All edit tokens expire after two minutes and are consumed on attempted writes.
+Office edit tokens expire after fifteen minutes and are consumed on attempted writes.
 Comparison and mutation are separate Office batches; no operation claims atomic
 protection against another editor. After an uncertain write, inspect current
 state before deciding whether another write is needed.
+
+### Compact responses and batched edits
+
+Office cell reads and paragraph/range writes default to `responseMode: "compact"`.
+Use `"full"` for the previous dense response, including resulting content after
+a write. Complete snapshots remain in the task pane for comparison with live
+state; compact output does not weaken write checks.
+
+`excel_read_range` returns the values matrix once. Optional `formulaCells` and
+`textCells` arrays encode differences as `[rowOffset, columnOffset, value]`, with
+zero-based offsets relative to the requested rectangle. Without an entry, the
+formula is the cell value and the displayed text is `String(value ?? "")`.
+`excel_read_range_format` returns formatting without cell matrices. A uniform
+`format.numberFormat` is a single string; mixed formats remain a matrix. Column
+widths and row heights remain arrays. Full mode preserves all original matrices.
+Successful projected writes return `applied`, target IDs/address and a fresh
+`readToken`; they do not echo cell/paragraph content or formatting.
+
+Responses are capped at 32 KiB and retained comparison snapshots at 128 KiB.
+There are at most 512 tokens per document, expiring after fifteen minutes.
+Large cell content can still require smaller ranges. Read relevant ranges or
+pages once and reuse the tokens; do not reread merely to confirm `applied: true`.
+
+`word_batch_edit(documentId, edits)` supports `replace_text`, `replace_paragraph`,
+`insert_paragraph`, `delete_paragraph` and `format_paragraph`.
+`excel_batch_edit(documentId, edits)` supports `write_range`, `set_formulas` and
+`format_range`. Each edit contains `operation` plus the single tool's arguments,
+omitting `documentId` and `responseMode`. Batches require distinct read tokens,
+contain 1–20 edits and fit within 32 KiB. All argument schemas and cross-field
+checks run before the first edit. Each edit then runs sequentially through the
+ordinary bridge, application, read-token and coauthor checks.
+
+Results contain `completed` and indexed compact `results`. On failure they also
+contain `failedIndex`, `error`, `uncertain: true` and `notAttempted`. Earlier
+writes remain applied; inspect the failed target before considering another
+write and never replay the entire batch. After thirty seconds the server stops
+before starting another edit, returning `stopped: "time_budget"`, `nextIndex`
+and `notAttempted`. An in-flight edit keeps its ordinary bridge deadline. For
+multiple new paragraphs at one anchor, use `word_insert_paragraphs` to insert
+the section in one Office operation (1–20 paragraphs, 32 KiB total).
 
 Reference APIs:
 [Excel ranges](https://learn.microsoft.com/en-us/javascript/api/excel/excel.range?view=excel-js-1.9),

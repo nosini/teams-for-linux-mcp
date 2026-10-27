@@ -18,8 +18,8 @@ const { excelFixture } = require("../fixtures/excelApi");
 const { wordFixture } = require("../fixtures/wordApi");
 const execFileAsync = promisify(execFile);
 
-function fixture(application = "excel") {
-  const api = application === "word" ? wordFixture() : excelFixture();
+function fixture(application = "excel", initial) {
+  const api = application === "word" ? wordFixture(initial) : excelFixture(initial);
   const { model } = api;
   const id = randomUUID();
   const origin = "https://127.0.0.1:39847";
@@ -192,7 +192,7 @@ describe("Live Office bridge", () => {
     assert.deepEqual(model.values, [[7]]);
     const stale = await call("excel_write_range", { ...target, readToken: first.structuredContent.readToken, data: [[9]] });
     assert.equal(stale.isError, true);
-    const formula = await call("excel_set_formulas", { ...target, readToken: updated.structuredContent.readToken, data: [["=1+2"]] });
+    const formula = await call("excel_set_formulas", { ...target, readToken: updated.structuredContent.readToken, data: [["=1+2"]], responseMode: "full" });
     assert.equal(formula.structuredContent.values[0][0], 3);
     const invalid = await call("excel_write_range", { ...target, readToken: formula.structuredContent.readToken, data: [["=1+3"]] });
     assert.equal(invalid.isError, true);
@@ -212,7 +212,7 @@ describe("Live Office bridge", () => {
       const call = (name, args = {}) => client.callTool({ name, arguments: { documentId: id, ...args } });
       await client.callTool({ name: "office_list_documents", arguments: {} });
       const tools = (await client.listTools()).tools;
-      assert.equal(tools.length, 32);
+      assert.equal(tools.length, 35);
       assert.equal(tools.find((tool) => tool.name === "word_read_structure").annotations.readOnlyHint, true);
       assert.equal(tools.find((tool) => tool.name === "word_resolve_tracked_change").annotations.destructiveHint, true);
       if (application === "excel") {
@@ -225,12 +225,12 @@ describe("Live Office bridge", () => {
         assert.equal((await call("excel_inspect_worksheet", { worksheetId: "sheet-id" })).structuredContent.usedRange.rowCount, 1);
         assert.equal((await call("excel_search_range", { ...target, query: "1" })).structuredContent.matches[0].address, "A1");
         const read = (await call("excel_read_range_format", target)).structuredContent;
-        const result = await call("excel_format_range", { ...target, readToken: read.readToken, format: { numberFormat: "0.00", font: { bold: true }, columnWidth: 120, rowHeight: 30 } });
+        const result = await call("excel_format_range", { ...target, readToken: read.readToken, format: { numberFormat: "0.00", font: { bold: true }, columnWidth: 120, rowHeight: 30 }, responseMode: "full" });
         assert.equal(result.structuredContent.format.font.bold, true);
         assert.deepEqual(result.structuredContent.format.columnWidths, [120]);
         assert.deepEqual(result.structuredContent.format.rowHeights, [30]);
         for (const format of [{ columnWidth: -1 }, { rowHeight: 410 }, { columnWidth: 100, autoFitColumns: true }, { autoFitRows: false }]) assert.equal((await call("excel_format_range", { ...target, readToken: result.structuredContent.readToken, format })).isError, true);
-        const fitted = await call("excel_format_range", { ...target, readToken: result.structuredContent.readToken, format: { autoFitColumns: true, autoFitRows: true } });
+        const fitted = await call("excel_format_range", { ...target, readToken: result.structuredContent.readToken, format: { autoFitColumns: true, autoFitRows: true }, responseMode: "full" });
         assert.equal(fitted.structuredContent.applied, true);
         assert.deepEqual(fitted.structuredContent.format.columnWidths, [7]);
         assert.equal((await call("excel_format_range", { ...target, readToken: result.structuredContent.readToken, format: { arbitrary: true } })).isError, true);
@@ -242,7 +242,7 @@ describe("Live Office bridge", () => {
         assert.equal(structure.paragraphs[0].styleBuiltIn, "Normal");
         const target = { paragraphId: structure.paragraphs[0].paragraphId };
         const details = (await call("word_read_paragraph_details", target)).structuredContent;
-        const result = await call("word_format_paragraph", { ...target, readToken: details.readToken, format: { styleBuiltIn: "Heading1" } });
+        const result = await call("word_format_paragraph", { ...target, readToken: details.readToken, format: { styleBuiltIn: "Heading1" }, responseMode: "full" });
         assert.equal(result.structuredContent.format.styleBuiltIn, "Heading1");
         const added = await call("word_add_comment", { ...target, readToken: result.structuredContent.readToken, text: "Please review" });
         assert.equal(added.structuredContent.applied, true);
@@ -252,6 +252,74 @@ describe("Live Office bridge", () => {
         assert.equal((await call("word_replace_paragraph", { ...target, readToken: details.readToken, text: "bad\nparagraph" })).isError, true);
         assert.equal((await call("excel_inspect_worksheet", { worksheetId: "sheet-id" })).isError, true);
       }
+    });
+  });
+
+  it("batches edits through the official MCP client, validates before writing, and reports partial failures", async (t) => {
+    for (const application of ["word", "excel"]) await t.test(application, async (t) => {
+      const root = testPath("mcp");
+      await fs.mkdir(root, { recursive: true });
+      const directory = await fs.mkdtemp(path.join(root, "batch-"));
+      const { bridge, id, model } = fixture(application, application === "word" ? ["First", "Second", "Third"] : undefined);
+      const endpoint = await startLocalEndpoint({ directory, createServer: () => createOfficeMcpServer({ listEditors: () => ({ editors: [] }) }, bridge) });
+      const client = new Client({ name: "batch-test", version: "1" });
+      t.after(async () => { await client.close(); await endpoint.close(); await fs.rm(directory, { recursive: true, force: true }); });
+      await client.connect(new StdioClientTransport({ command: process.execPath, args: [path.resolve(__dirname, "../../app/mcp/stdio.js"), endpoint.socketPath] }));
+      await client.callTool({ name: "office_list_documents", arguments: {} });
+      const call = (name, args = {}) => client.callTool({ name, arguments: { documentId: id, ...args } });
+      const batch = (edits) => call(`${application}_batch_edit`, { edits });
+      if (application === "word") {
+        const page = (await call("word_read_paragraphs")).structuredContent.paragraphs;
+        const edit = (index, text) => ({ operation: "replace_paragraph", paragraphId: page[index].paragraphId, readToken: page[index].readToken, text });
+        const first = edit(0, "Updated first"), second = edit(1, "Updated second");
+        assert.equal((await batch([first, { ...second, text: "Invalid\nbreak" }])).isError, true);
+        assert.equal((await batch([first, first])).isError, true);
+        assert.equal((await batch([first, { ...second, responseMode: "full" }])).isError, true);
+        assert.equal(model.writes, 0);
+        const completed = (await batch([first, second])).structuredContent;
+        assert.equal(completed.completed, 2);
+        assert.equal(Object.hasOwn(completed.results[0], "text"), false);
+        assert.deepEqual(model.paragraphs.map(({ text }) => text), ["Updated first", "Updated second", "Third"]);
+        model.paragraphs[2].text = "Coauthor edit";
+        const result = (await batch([
+          { operation: "replace_text", paragraphId: page[0].paragraphId, readToken: completed.results[0].readToken, findText: "Updated", replacementText: "Revised" },
+          edit(2, "Overwrite"),
+          { ...second, readToken: completed.results[1].readToken, text: "Must not run" },
+        ])).structuredContent;
+        assert.equal(result.completed, 1);
+        assert.equal(result.failedIndex, 1);
+        assert.equal(result.uncertain, true);
+        assert.equal(result.notAttempted, 1);
+        assert.deepEqual(model.paragraphs.map(({ text }) => text), ["Revised first", "Updated second", "Coauthor edit"]);
+        const inserted = await call("word_insert_paragraphs", { paragraphId: page[0].paragraphId, readToken: result.results[0].readToken, position: "After", paragraphs: [{ text: "Section", styleBuiltIn: "Heading1" }, { text: "Body" }] });
+        assert.equal(inserted.structuredContent.paragraphs.length, 2);
+        assert.deepEqual(model.paragraphs.slice(0, 3).map(({ text }) => text), ["Revised first", "Section", "Body"]);
+      } else {
+        const target = { worksheetId: "sheet-id", address: "A1" };
+        const read = (await call("excel_read_range", target)).structuredContent;
+        const format = (await call("excel_read_range_format", target)).structuredContent;
+        const edits = [
+          { operation: "write_range", ...target, readToken: read.readToken, data: [[1]] },
+          { operation: "format_range", ...target, readToken: format.readToken, format: { font: { bold: true } } },
+        ];
+        assert.equal((await batch([edits[0], { ...edits[1], format: { arbitrary: true } }])).isError, true);
+        assert.equal((await batch([{ ...edits[0], data: [["=1+2"]] }, edits[1]])).isError, true);
+        assert.equal(model.writes, 0);
+        const completed = (await batch(edits)).structuredContent;
+        assert.equal(completed.completed, 2);
+        assert.equal(model.font.bold, true);
+        assert.equal(model.writes, 2);
+        assert.equal(Object.hasOwn(completed.results[0], "values"), false);
+        assert.equal(Object.hasOwn(completed.results[1], "format"), false);
+        const readAgain = (await call("excel_read_range", target)).structuredContent;
+        model.formulas = [["=1"]];
+        const stopped = (await batch([{ ...edits[0], readToken: readAgain.readToken, data: [[9]] }])).structuredContent;
+        assert.equal(stopped.completed, 0);
+        assert.equal(stopped.failedIndex, 0);
+        assert.equal(model.writes, 2);
+      }
+      assert.equal((await batch([])).isError, true);
+      assert.equal((await batch([{ operation: "read_range" }])).isError, true);
     });
   });
 
@@ -274,7 +342,8 @@ describe("Live Office bridge", () => {
     const fresh = (await call("word_read_paragraph", target)).structuredContent;
     const result = await call("word_replace_text", { ...target, readToken: fresh.readToken, findText: "Hello", replacementText: "Updated" });
     assert.equal(result.structuredContent.applied, true);
-    assert.equal(result.structuredContent.text, "Updated from Word.");
+    assert.equal(Object.hasOwn(result.structuredContent, "text"), false);
+    assert.equal(model.paragraphs[0].text, "Updated from Word.");
     const stale = await call("word_replace_text", { ...target, readToken: fresh.readToken, findText: "Updated", replacementText: "Again" });
     assert.equal(stale.isError, true);
     const invalid = await call("word_replace_text", { ...target, readToken: result.structuredContent.readToken, findText: "^p", replacementText: "" });

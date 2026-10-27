@@ -3,6 +3,8 @@ const assert = require("node:assert/strict");
 const { z } = require("zod");
 const { registerJsonTool } = require("../../app/mcp/tools");
 const { evaluateInFrame } = require("../../app/mcp/evaluateInFrame");
+const { registerBatchTools } = require("../../app/mcp/batchTools");
+const { randomUUID } = require("node:crypto");
 
 function fakeServer() {
   const tools = new Map();
@@ -10,6 +12,37 @@ function fakeServer() {
 }
 
 describe("MCP tool helpers", () => {
+  it("bounds batches before execution and stops before starting another edit after the time budget", async () => {
+    const server = fakeServer();
+    const documentId = randomUUID(), paragraphId = randomUUID();
+    let now = 0, calls = 0;
+    const definition = registerJsonTool(server, "word_replace_paragraph", {
+      description: "Replace.", writing: true, openWorld: false,
+      inputSchema: z.object({ documentId: z.string().uuid(), paragraphId: z.string().uuid(), readToken: z.string().uuid(), text: z.string().max(8192) }).strict(),
+    }, async (args) => {
+      assert.equal(args.documentId, documentId);
+      assert.equal(args.responseMode, "compact");
+      calls++; now += 100;
+      return { paragraphId, applied: true, readToken: randomUUID() };
+    });
+    registerBatchTools(server, [definition], { now: () => now, maxDurationMs: 100 });
+    const batch = server.tools.get("word_batch_edit");
+    const edit = (text = "Updated") => ({ operation: "replace_paragraph", paragraphId, readToken: randomUUID(), text });
+    for (const edits of [[], Array.from({ length: 21 }, () => edit()), [edit("漢".repeat(8192)), edit("漢".repeat(8192))]]) {
+      assert.equal(batch.inputSchema.safeParse({ documentId, edits }).success, false);
+      assert.equal(calls, 0);
+    }
+    const args = batch.inputSchema.parse({ documentId, edits: [edit(), edit()] });
+    const result = (await batch.handler(args)).structuredContent;
+    assert.equal(result.completed, 1);
+    assert.equal(result.nextIndex, 1);
+    assert.equal(result.stopped, "time_budget");
+    assert.equal(result.notAttempted, 1);
+    assert.equal(calls, 1);
+    assert.equal(batch.annotations.destructiveHint, true);
+    assert.equal(batch.annotations.idempotentHint, false);
+  });
+
   it("returns JSON results, sanitized or fixed errors and explicit annotations", async () => {
     const server = fakeServer();
     const inputSchema = z.object({}).strict();

@@ -162,11 +162,14 @@ app.whenReady().then(async () => {
     const targets = await Promise.all(docs.slice(0, 2).map(async (doc) => ({ documentId: doc.id, worksheetId: (await call("excel_list_worksheets", { documentId: doc.id })).worksheets[0].id, address: "A1" })));
     const reads = await Promise.all(targets.map((target) => call("excel_read_range", target)));
     const written = await Promise.all(targets.map((target, i) => call("excel_write_range", { ...target, readToken: reads[i].readToken, data: [[i + 41]] })));
-    assert.deepEqual(written.map((result) => result.values), [[[41]], [[42]]]);
+    assert.ok(written.every((result) => result.applied && !Object.hasOwn(result, "values")));
+    for (let i = 0; i < targets.length; i++) assert.deepEqual((await call("excel_read_range", targets[i])).values, [[41 + i]]);
     const paragraphs = await call("word_read_paragraphs", { documentId: docs[2].id });
     const paragraph = paragraphs.paragraphs[0];
     const edited = await call("word_replace_text", { documentId: docs[2].id, paragraphId: paragraph.paragraphId, readToken: paragraph.readToken, findText: "Hello", replacementText: "Background" });
-    assert.equal(edited.text, "Background from Word.");
+    assert.equal(edited.applied, true);
+    assert.equal(Object.hasOwn(edited, "text"), false);
+    assert.equal((await call("word_read_paragraph", { documentId: docs[2].id, paragraphId: paragraph.paragraphId })).text, "Background from Word.");
     const firstContents = webContents.fromId(listing.tabs[0].webContentsId);
     assert.equal(firstContents.session, fixtureSession);
     assert.equal(firstContents.getBackgroundThrottling(), false);

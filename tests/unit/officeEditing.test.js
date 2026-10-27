@@ -1,7 +1,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
-const { ExcelSession, editing } = require("../../app/office/addin/operations");
+const { ExcelSession, editing, readTokenLifetime } = require("../../app/office/addin/operations");
 const { WordSession } = require("../../app/office/addin/wordOperations");
 const { excelFixture } = require("../fixtures/excelApi");
 const { wordFixture } = require("../fixtures/wordApi");
@@ -13,7 +13,7 @@ function fixture(application = "word", data, apiSupport = () => true) {
   const session = application === "word" ? new WordSession(api.word, options) : new ExcelSession(api.excel, options);
   const call = (operation, args = {}) => session.execute({ documentId: options.documentId, deadline: now + 10000, operation, args });
   const paragraph = async () => (await call("read_paragraphs", { count: 1 })).data.paragraphs[0];
-  return { call, session, model: api.model, paragraph, expire: () => { now += 120000; }, navigate: () => { url = "other"; } };
+  return { call, session, model: api.model, paragraph, expire: () => { now += readTokenLifetime; }, navigate: () => { url = "other"; } };
 }
 const target = { worksheetId: "sheet-id", address: "A1" };
 
@@ -52,7 +52,7 @@ describe("Extended Excel live editing", () => {
   it("reads and changes only requested range formatting while preserving cell contents", async () => {
     const { call, model } = fixture("excel", [[0.25]]);
     const before = (await call("read_range_format", target)).data;
-    assert.deepEqual(before.format.numberFormat, [["General"]]);
+    assert.equal(before.format.numberFormat, "General");
     const result = await call("format_range", { ...target, readToken: before.readToken, format: { numberFormat: "0.0%", font: { bold: true }, fillColor: "#FFFF00", wrapText: true } });
     assert.equal(result.ok, true);
     assert.equal(result.data.applied, true);
@@ -85,7 +85,7 @@ describe("Extended Excel live editing", () => {
     const before = (await call("read_range_format", area)).data;
     assert.deepEqual(before.format.columnWidths, [60, 90]);
     assert.deepEqual(before.format.rowHeights, [15, 20]);
-    const result = await call("format_range", { ...area, readToken: before.readToken, format: { columnWidth: 120, rowHeight: 30 } });
+    const result = await call("format_range", { ...area, readToken: before.readToken, format: { columnWidth: 120, rowHeight: 30 }, responseMode: "full" });
     assert.equal(result.ok, true);
     assert.deepEqual(result.data.format.columnWidths, [120, 120]);
     assert.deepEqual(result.data.format.rowHeights, [30, 30]);
@@ -115,7 +115,7 @@ describe("Extended Excel live editing", () => {
     const { call, model } = fixture("excel", [["Long label", "Short"], ["Outside the selected row", "x"]]);
     const area = { worksheetId: "sheet-id", address: "A1:B1" };
     const before = (await call("read_range_format", area)).data;
-    const result = await call("format_range", { ...area, readToken: before.readToken, format: { autoFitColumns: true, autoFitRows: true } });
+    const result = await call("format_range", { ...area, readToken: before.readToken, format: { autoFitColumns: true, autoFitRows: true }, responseMode: "full" });
     assert.equal(result.ok, true);
     assert.deepEqual(result.data.format.columnWidths, [70, 35]);
     assert.deepEqual(result.data.format.rowHeights, [15]);
@@ -216,7 +216,7 @@ describe("Extended Word live editing", () => {
     model.paragraphs[0].font.size = 20;
     assert.equal((await call("format_paragraph", { ...fresh, format: { font: { italic: true } } })).code, "STALE_PARAGRAPH");
     assert.equal(model.paragraphs[0].font.italic, false);
-    assert.equal((await call("format_paragraph", { ...target, format: { font: { italic: true } } })).code, "STALE_PARAGRAPH");
+    assert.equal((await call("format_paragraph", { ...target, format: { font: { italic: true } } })).code, "STALE_STRUCTURE");
   });
 
   it("adds, reads, replies to, resolves and reopens a stable comment thread", async () => {
